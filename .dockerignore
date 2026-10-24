@@ -1,0 +1,27 @@
+# Development environments & caches
+.venv
+venv
+env
+node_modules
+dist
+dist_release
+__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# Git & IDE
+.git
+.gitignore
+.idea
+.vscode
+*.swp
+
+# Secrets & local config
+.env
+.env.*
+! .env.example
+*.log

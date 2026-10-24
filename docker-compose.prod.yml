@@ -1,0 +1,73 @@
+# Genius AI Assistant - Production Compose Profile (Profile B)
+# Database is kept completely private with NO exposed host ports.
+# Mandatory cryptographic JWT authentication and strict CORS.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: genius_postgres_prod
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-genius_ai}
+    # Security: NO host ports published! Database is accessible only via genius_prod_net.
+    volumes:
+      - pgdata_prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB:-genius_ai}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - genius_prod_net
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2048M
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: genius_backend_prod
+    restart: always
+    ports:
+      # Expose only the backend API (or behind reverse proxy)
+      - "${APP_PORT:-8000}:8000"
+    environment:
+      APP_ENV: production
+      APP_HOST: 0.0.0.0
+      APP_PORT: 8000
+      AUTH_REQUIRED: "true"
+      SECRET_KEY: ${SECRET_KEY}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-genius_ai}
+      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-genius_ai}"
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-llama3.2}
+      STT_DEVICE: ${STT_DEVICE:-cpu}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - genius_prod_net
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 4096M
+
+networks:
+  genius_prod_net:
+    driver: bridge
+
+volumes:
+  pgdata_prod:
+    driver: local

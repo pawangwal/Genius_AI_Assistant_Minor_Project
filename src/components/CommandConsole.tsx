@@ -1,245 +1,307 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Terminal, Search, Send, WifiOff, Loader2 } from 'lucide-react';
+import { Terminal, Send, WifiOff, Loader2, Mic, MicOff, Wrench, AlertCircle } from 'lucide-react';
 import { useInterface } from '../context/InterfaceContext';
 import { useStore } from '../store/useStore';
+import { AudioRecorderService, uploadAndTranscribeAudio } from '../services/audioRecorder';
 
-const API_URL = 'http://localhost:5001';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
 const CommandConsole: React.FC = () => {
   const { isListening, setIsListening } = useInterface();
   const { messages, addMessage } = useStore();
-  const [displayText, setDisplayText] = useState('');
-  const [currentIndex, setCurrentIndex] = useState(0);
   const [inputText, setInputText] = useState('');
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [activeTool, setActiveTool] = useState<string | null>(null);
 
   const consoleRef = useRef<HTMLDivElement>(null);
-  const currentMessage = messages[messages.length - 1];
+  const recorderRef = useRef<AudioRecorderService>(new AudioRecorderService());
 
-  // Check server connection periodically
+  // Check backend server readiness probe periodically
   useEffect(() => {
     const checkConnection = async () => {
       try {
-        const response = await fetch(`${API_URL}/api/health`);
+        const response = await fetch(`${API_BASE_URL}/api/v1/health/ready`);
         const data = await response.json();
-        if (data.status === 'ok') {
+        if (response.ok && data.status === 'ready') {
           setIsConnected(true);
           setConnectionError(null);
+        } else {
+          setIsConnected(false);
+          const dbStatus = data.dependencies?.database || 'disconnected';
+          setConnectionError(`Backend degraded: Database ${dbStatus}`);
         }
       } catch (error) {
         setIsConnected(false);
-        setConnectionError('Unable to connect to server. Please ensure the Python server is running (python3 server.py)');
+        setConnectionError('Unable to connect to FastAPI backend (http://127.0.0.1:8000).');
       }
     };
 
     checkConnection();
     const interval = setInterval(checkConnection, 5000);
-
     return () => clearInterval(interval);
   }, []);
 
+  // Auto-scroll console
   useEffect(() => {
-    if (currentMessage?.type === 'assistant') {
-      const text = currentMessage.text;
-      let index = 0;
-
-      setDisplayText('');
-      setCurrentIndex(0);
-
-      const typingInterval = setInterval(() => {
-        if (index < text.length) {
-          setDisplayText(prev => prev + text.charAt(index));
-          setCurrentIndex(index);
-          index++;
-        } else {
-          clearInterval(typingInterval);
-        }
-      }, 30);
-
-      // Speak after typing
-      const timeout = setTimeout(() => {
-        speakText(text);
-      }, text.length * 30 + 500);
-
-      return () => {
-        clearInterval(typingInterval);
-        clearTimeout(timeout);
-      };
+    if (consoleRef.current) {
+      consoleRef.current.scrollTop = consoleRef.current.scrollHeight;
     }
-  }, [currentMessage]);
+  }, [messages, activeTool]);
 
+  // Client-side Text-to-Speech with Hindi auto-detection
   const speakText = (text: string) => {
+    if (!window.speechSynthesis) return;
+
+    window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
 
-    // Detect if Hindi text
+    // Detect if Hindi text (Devanagari Unicode block)
     if (/[ऀ-ॿ]/.test(text)) {
-      const availableVoices = window.speechSynthesis.getVoices();
-      const hindiVoice = availableVoices.find(v => v.lang === 'hi-IN');
+      const voices = window.speechSynthesis.getVoices();
+      const hindiVoice = voices.find((v) => v.lang.includes('hi') || v.name.includes('Hindi'));
       if (hindiVoice) {
         utterance.voice = hindiVoice;
         utterance.lang = 'hi-IN';
       } else {
-        console.warn('No Hindi voice available. Falling back to English.');
-        utterance.lang = 'en-US';
+        utterance.lang = 'hi-IN';
       }
     } else {
       utterance.lang = 'en-US';
     }
 
+    utterance.rate = 1.05;
     window.speechSynthesis.speak(utterance);
   };
 
+  // Browser MediaRecorder voice capture flow
   useEffect(() => {
-    if (consoleRef.current) {
-      consoleRef.current.scrollTop = consoleRef.current.scrollHeight;
-    }
-  }, [messages, displayText]);
+    let isCancelled = false;
 
-  useEffect(() => {
-    if (isListening && isConnected) {
-      fetch(`${API_URL}/api/listen`, {
-        method: 'POST'
-      })
-        .then(response => response.json())
-        .then(data => {
-          if (data.error) {
-            addMessage(data.error, 'assistant');
-          } else {
-            addMessage(data.transcription, 'user');
-            addMessage(data.response, 'assistant');
-          }
-        })
-        .catch(error => {
-          console.error('Error during listening:', error);
-          addMessage("Sorry, there was an error processing your voice input.", 'assistant');
-        })
-        .finally(() => {
+    const handleVoiceCapture = async () => {
+      if (isListening) {
+        try {
+          await recorderRef.current.startRecording();
+        } catch (err: any) {
+          addMessage(err.message || 'Microphone access denied.', 'assistant');
           setIsListening(false);
-        });
-    }
+        }
+      } else {
+        // User stopped listening: finish recording and upload
+        try {
+          const audioBlob = await recorderRef.current.stopRecording();
+          if (!isCancelled && audioBlob.size > 0) {
+            setIsLoading(true);
+            addMessage('Transcribing audio locally...', 'assistant');
+
+            const result = await uploadAndTranscribeAudio(audioBlob);
+            if (result.text && result.text.trim()) {
+              addMessage(result.text, 'user');
+              await executeChatCompletion(result.text);
+            } else {
+              addMessage('No speech detected. Please try again.', 'assistant');
+              setIsLoading(false);
+            }
+          }
+        } catch (err: any) {
+          if (!isCancelled) {
+            addMessage(`Voice transcription error: ${err.message}`, 'assistant');
+            setIsLoading(false);
+          }
+        }
+      }
+    };
+
+    handleVoiceCapture();
+    return () => {
+      isCancelled = true;
+    };
   }, [isListening]);
+
+  // Execute chat with SSE Streaming and tool execution events
+  const executeChatCompletion = async (userPrompt: string) => {
+    setIsLoading(true);
+    setActiveTool(null);
+
+    const conversationHistory = messages.map((m) => ({
+      role: m.type === 'assistant' ? 'assistant' : 'user',
+      content: m.text,
+    }));
+    conversationHistory.push({ role: 'user', content: userPrompt });
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: conversationHistory,
+          stream: true,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server returned status ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let assistantResponse = '';
+      let currentEvent = '';
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+
+          for (const line of lines) {
+            if (line.startsWith('event: ')) {
+              currentEvent = line.replace('event: ', '').trim();
+            } else if (line.startsWith('data: ')) {
+              const dataStr = line.replace('data: ', '').trim();
+              try {
+                const data = JSON.parse(dataStr);
+
+                if (currentEvent === 'tool_call') {
+                  setActiveTool(`Executing ${data.tool}...`);
+                } else if (currentEvent === 'tool_result') {
+                  setActiveTool(null);
+                  if (data.result?.action === 'client_navigate' && data.result?.url) {
+                    window.open(data.result.url, '_blank', 'noopener,noreferrer');
+                  }
+                } else if (currentEvent === 'token') {
+                  assistantResponse += data.text;
+                } else if (currentEvent === 'error') {
+                  throw new Error(data.error);
+                }
+              } catch (e: any) {
+                if (currentEvent === 'error') throw e;
+              }
+            }
+          }
+        }
+      }
+
+      if (assistantResponse) {
+        addMessage(assistantResponse, 'assistant');
+        speakText(assistantResponse);
+      }
+    } catch (err: any) {
+      addMessage(`Error: ${err.message || 'Failed to complete request.'}`, 'assistant');
+    } finally {
+      setIsLoading(false);
+      setActiveTool(null);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (inputText.trim() && isConnected && !isLoading) {
-      const userMessage = inputText.trim();
-      addMessage(userMessage, 'user');
-      setInputText('');
-      setIsLoading(true);
+    if (!inputText.trim() || isLoading) return;
 
-      try {
-        const response = await fetch(`${API_URL}/api/chat`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ text: userMessage }),
-        });
-
-        const data = await response.json();
-        if (data.error) {
-          addMessage(data.error, 'assistant');
-        } else {
-          addMessage(data.response, 'assistant');
-        }
-      } catch (error) {
-        console.error('Error sending message:', error);
-        addMessage("Sorry, there was an error processing your message.", 'assistant');
-      } finally {
-        setIsLoading(false);
-      }
-    }
-  };
-
-  const formatTimestamp = (timestamp: string | Date) => {
-    const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
-    return date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+    const prompt = inputText.trim();
+    setInputText('');
+    addMessage(prompt, 'user');
+    await executeChatCompletion(prompt);
   };
 
   return (
-    <div className="w-full bg-black bg-opacity-30 backdrop-blur-md rounded-lg border border-cyan-900 overflow-hidden">
-      <div className="flex items-center p-2 bg-gradient-to-r from-blue-900/50 to-purple-900/50 border-b border-cyan-900">
-        <Terminal size={18} className="text-cyan-400 mr-2" />
-        <h3 className="text-cyan-300 font-semibold">Command Console</h3>
-        {!isConnected && (
-          <div className="ml-auto flex items-center gap-2 text-xs text-red-400">
-            <WifiOff size={14} />
-            <span>Disconnected</span>
+    <div className="w-full bg-black/40 backdrop-blur-md rounded-lg border border-cyan-900 overflow-hidden shadow-2xl flex flex-col h-[520px]">
+      {/* Console Header */}
+      <div className="flex items-center justify-between p-3 bg-gradient-to-r from-blue-950/80 via-purple-950/80 to-cyan-950/80 border-b border-cyan-900/60">
+        <div className="flex items-center gap-2">
+          <Terminal size={18} className="text-cyan-400" />
+          <h3 className="text-cyan-200 font-semibold text-sm tracking-wide">Genius Local Command Console</h3>
+        </div>
+        <div className="flex items-center gap-2">
+          {!isConnected ? (
+            <div className="flex items-center gap-1.5 text-xs text-red-400 bg-red-950/50 px-2 py-0.5 rounded border border-red-800">
+              <WifiOff size={13} />
+              <span>Offline</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-800">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span>FastAPI & Ollama Active</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {connectionError && (
+        <div className="bg-red-950/40 border-b border-red-800/80 p-2.5 text-red-300 text-xs flex items-center gap-2">
+          <AlertCircle size={14} className="text-red-400 shrink-0" />
+          <span>{connectionError}</span>
+        </div>
+      )}
+
+      {/* Message Stream Display */}
+      <div ref={consoleRef} className="flex-1 p-4 overflow-y-auto space-y-3 font-mono text-xs">
+        {messages.length === 0 && (
+          <div className="text-center py-16 text-cyan-700/80">
+            <p className="text-sm font-semibold text-cyan-400 mb-1">Genius AI Assistant Ready</p>
+            <p className="text-xs">Ask in English or Hindi • Predict IPL matches • Manage tasks & reminders offline</p>
+          </div>
+        )}
+
+        {messages.map((m) => (
+          <div
+            key={m.id}
+            className={`p-3 rounded-lg max-w-[85%] ${
+              m.type === 'user'
+                ? 'ml-auto bg-cyan-950/60 border border-cyan-800/60 text-cyan-100'
+                : 'mr-auto bg-purple-950/50 border border-purple-900/50 text-purple-100'
+            }`}
+          >
+            <div className="flex items-center justify-between text-[10px] text-cyan-500 mb-1">
+              <span className="uppercase font-bold">{m.type === 'user' ? 'Operator' : 'Genius'}</span>
+              <span>{new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+            </div>
+            <div className="whitespace-pre-wrap leading-relaxed text-sm font-sans">{m.text}</div>
+          </div>
+        ))}
+
+        {activeTool && (
+          <div className="flex items-center gap-2 p-2 bg-yellow-950/40 border border-yellow-800/60 rounded text-yellow-300 text-xs animate-pulse">
+            <Wrench size={14} className="animate-spin text-yellow-400" />
+            <span>{activeTool}</span>
           </div>
         )}
       </div>
 
-      {connectionError && (
-        <div className="bg-red-900/30 border-b border-red-700 p-3 text-red-300 text-sm">
-          {connectionError}
-        </div>
-      )}
+      {/* Input Bar */}
+      <form onSubmit={handleSubmit} className="p-3 bg-black/60 border-t border-cyan-900/60 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setIsListening(!isListening)}
+          className={`p-2.5 rounded-lg border transition-all ${
+            isListening
+              ? 'bg-red-600 border-red-500 text-white animate-pulse'
+              : 'bg-cyan-950/60 border-cyan-800/80 text-cyan-300 hover:bg-cyan-900/80'
+          }`}
+          title={isListening ? 'Stop Recording' : 'Start Voice Input'}
+        >
+          {isListening ? <MicOff size={18} /> : <Mic size={18} />}
+        </button>
 
-      <div 
-        ref={consoleRef}
-        className="h-48 md:h-64 overflow-y-auto p-4 scrollbar-thin scrollbar-thumb-cyan-900 scrollbar-track-transparent"
-        style={{ scrollbarWidth: 'thin', scrollbarColor: '#0B7285 transparent' }}
-      >
-        {messages.map((message, index) => (
-          <div 
-            key={message.id} 
-            className={`mb-3 ${message.type === 'user' ? 'text-right' : 'text-left'}`}
-          >
-            <div 
-              className={`inline-block max-w-[85%] px-3 py-2 rounded-lg ${
-                message.type === 'user' 
-                  ? 'bg-purple-900/50 text-purple-200 rounded-tr-none' 
-                  : 'bg-blue-900/50 text-cyan-200 rounded-tl-none'
-              }`}
-            >
-              <div className="text-xs opacity-70 mb-1">
-                {message.type === 'user' ? 'YOU' : 'GENIUS'} • {formatTimestamp(message.timestamp)}
-              </div>
+        <input
+          type="text"
+          value={inputText}
+          onChange={(e) => setInputText(e.target.value)}
+          placeholder={isListening ? 'Listening via browser microphone...' : 'Type a command or ask a question in Hindi / English...'}
+          disabled={isLoading || isListening}
+          className="flex-1 bg-black/50 border border-cyan-900/70 rounded-lg px-3.5 py-2 text-cyan-100 placeholder-cyan-700 text-sm focus:outline-none focus:border-cyan-500"
+        />
 
-              <div className="break-words">
-                {index === messages.length - 1 && message.type === 'assistant' 
-                  ? displayText 
-                  : message.text}
-                {index === messages.length - 1 && message.type === 'assistant' && currentIndex < message.text.length && (
-                  <span className="inline-block w-2 h-4 ml-1 bg-cyan-400 animate-pulse" />
-                )}
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <form onSubmit={handleSubmit} className="p-3 border-t border-cyan-900/50">
-        <div className="flex gap-2">
-          <div className="flex-1 relative">
-            <Search size={16} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-cyan-700" />
-            <input
-              type="text"
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              placeholder={isConnected ? "Type your message..." : "Waiting for server connection..."}
-              className="w-full bg-black/30 border border-cyan-900/50 rounded-lg pl-10 pr-4 py-2 text-white placeholder-cyan-700 focus:outline-none focus:border-cyan-500"
-              disabled={!isConnected || isLoading}
-            />
-          </div>
-          <button
-            type="submit"
-            className={`p-2 rounded-lg flex items-center justify-center transition-colors ${
-              isConnected && !isLoading
-                ? 'bg-cyan-900/50 hover:bg-cyan-800/50 text-cyan-300' 
-                : 'bg-gray-800/50 text-gray-500 cursor-not-allowed'
-            }`}
-            disabled={!isConnected || isLoading}
-          >
-            {isLoading ? (
-              <Loader2 size={20} className="animate-spin" />
-            ) : (
-              <Send size={20} />
-            )}
-          </button>
-        </div>
+        <button
+          type="submit"
+          disabled={isLoading || !inputText.trim()}
+          className="bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-black font-bold p-2.5 rounded-lg flex items-center justify-center transition-all"
+        >
+          {isLoading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+        </button>
       </form>
     </div>
   );

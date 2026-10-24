@@ -1,2 +1,10 @@
 /// <reference types="vite/client" />
-GEMINI_API_KEY=AIzaSyBJXAwLL8478QwtRk4C1bLDj8a8G-DR4s0
+ 
+interface ImportMetaEnv {
+  readonly VITE_API_URL?: string;
+  readonly VITE_GEMINI_API_KEY?: string;
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv;
+}

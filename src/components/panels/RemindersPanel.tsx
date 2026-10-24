@@ -1,32 +1,72 @@
-import React, { useState } from 'react';
-import { Bell, Plus, Trash2, CheckCircle, Circle } from 'lucide-react';
-import { useStore } from '../../store/useStore';
-import { format, isAfter } from 'date-fns';
+import React, { useState, useEffect } from 'react';
+import { Bell, Plus, Trash2, CheckCircle, Circle, Loader2, AlertCircle } from 'lucide-react';
+import { fetchReminders, createReminder, deleteReminder, ReminderItem } from '../../services/api';
 
 const RemindersPanel: React.FC = () => {
+  const [reminders, setReminders] = useState<ReminderItem[]>([]);
   const [newReminder, setNewReminder] = useState('');
   const [newDateTime, setNewDateTime] = useState('');
-  const { reminders, addReminder, toggleReminder, removeReminder } = useStore();
-  
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (newReminder.trim() && newDateTime) {
-      addReminder(newReminder.trim(), new Date(newDateTime));
-      setNewReminder('');
-      setNewDateTime('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadReminders = async () => {
+    try {
+      setError(null);
+      const items = await fetchReminders();
+      setReminders(items);
+    } catch (err: any) {
+      setError(err.message || 'Unable to connect to reminders database.');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const sortedReminders = [...reminders].sort((a, b) => 
-    a.datetime.getTime() - b.datetime.getTime()
-  );
+  useEffect(() => {
+    loadReminders();
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newReminder.trim() && newDateTime) {
+      try {
+        const created = await createReminder(newReminder.trim(), newDateTime);
+        setReminders((prev) => [created, ...prev]);
+        setNewReminder('');
+        setNewDateTime('');
+      } catch (err: any) {
+        setError(err.message || 'Failed to create reminder');
+      }
+    }
+  };
+
+  const handleRemove = async (id: string) => {
+    try {
+      await deleteReminder(id);
+      setReminders((prev) => prev.filter((r) => r.id !== id));
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete reminder');
+    }
+  };
 
   return (
     <div className="h-full flex flex-col">
-      <div className="flex items-center mb-6">
-        <Bell className="text-purple-400 mr-2" size={24} />
-        <h2 className="text-xl font-bold text-purple-300">Reminders</h2>
+      <div className="flex items-center justify-between mb-6 border-b border-purple-900/40 pb-3">
+        <div className="flex items-center">
+          <Bell className="text-purple-400 mr-2" size={24} />
+          <div>
+            <h2 className="text-xl font-bold text-purple-300">Persistent Reminders</h2>
+            <p className="text-xs text-purple-600">PostgreSQL-backed async reminders store</p>
+          </div>
+        </div>
+        {loading && <Loader2 className="animate-spin text-purple-400" size={18} />}
       </div>
+
+      {error && (
+        <div className="mb-4 p-3 bg-red-950/50 border border-red-800 rounded-lg text-red-300 text-xs flex items-center gap-2">
+          <AlertCircle size={14} className="text-red-400 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="mb-6 space-y-3">
         <input
@@ -34,55 +74,49 @@ const RemindersPanel: React.FC = () => {
           value={newReminder}
           onChange={(e) => setNewReminder(e.target.value)}
           placeholder="Reminder title..."
-          className="w-full bg-black/30 border border-purple-900/50 rounded-lg px-4 py-2 text-white placeholder-purple-700 focus:outline-none focus:border-purple-500"
+          className="w-full bg-black/40 border border-purple-900/60 rounded-lg px-4 py-2 text-white placeholder-purple-700 focus:outline-none focus:border-purple-500 text-sm"
         />
         <div className="flex gap-2">
           <input
             type="datetime-local"
             value={newDateTime}
             onChange={(e) => setNewDateTime(e.target.value)}
-            className="flex-1 bg-black/30 border border-purple-900/50 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500"
+            className="flex-1 bg-black/40 border border-purple-900/60 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-purple-500 text-sm"
           />
           <button
             type="submit"
-            className="bg-purple-900/50 hover:bg-purple-800/50 text-purple-300 px-4 rounded-lg flex items-center"
+            className="bg-purple-900/60 hover:bg-purple-800/80 text-purple-300 px-4 rounded-lg flex items-center transition-colors"
           >
-            <Plus size={20} />
+            <Plus size={18} />
           </button>
         </div>
       </form>
 
-      <div className="flex-1 overflow-y-auto space-y-2">
-        {sortedReminders.map((reminder) => (
+      <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+        {reminders.length === 0 && !loading && (
+          <div className="text-center py-10 text-purple-700 text-sm">
+            No active reminders scheduled.
+          </div>
+        )}
+        {reminders.map((reminder) => (
           <div
             key={reminder.id}
-            className="flex items-center gap-3 p-3 bg-black/20 border border-purple-900/30 rounded-lg group"
+            className="flex items-center gap-3 p-3 bg-black/30 border border-purple-900/40 rounded-lg group hover:border-purple-700/50 transition-all"
           >
-            <button
-              onClick={() => toggleReminder(reminder.id)}
-              className="text-purple-400 hover:text-purple-300"
-            >
-              {reminder.completed ? (
-                <CheckCircle size={20} className="text-green-500" />
-              ) : (
-                <Circle size={20} />
-              )}
-            </button>
-            
             <div className="flex-1">
-              <div className={reminder.completed ? 'line-through text-purple-700' : 'text-purple-300'}>
+              <div className="text-purple-200 text-sm font-medium">
                 {reminder.title}
               </div>
-              <div className="text-sm text-purple-600">
-                {format(reminder.datetime, 'PPp')}
+              <div className="text-xs text-purple-400 font-mono mt-0.5">
+                Due: {reminder.due_time}
               </div>
             </div>
-            
+
             <button
-              onClick={() => removeReminder(reminder.id)}
-              className="opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-400"
+              onClick={() => handleRemove(reminder.id)}
+              className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-300 transition-opacity"
             >
-              <Trash2 size={18} />
+              <Trash2 size={16} />
             </button>
           </div>
         ))}
@@ -91,4 +125,4 @@ const RemindersPanel: React.FC = () => {
   );
 };
 
-export default RemindersPanel
+export default RemindersPanel;
