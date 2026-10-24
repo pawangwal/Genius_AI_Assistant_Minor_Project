@@ -66,7 +66,7 @@ graph TD
 
 ## ⚡ Key Highlights & Engineering Features
 
-### 1. Real-Time Cricket ML Engine (Zero Match Leakage)
+### 1. Real-Time Cricket ML Engine
 - **Model Architecture**: Serialized scikit-learn pipeline pairing a `ColumnTransformer` (One-Hot Encoding batting team, bowling team, and host city) with a calibrated `LogisticRegression(solver='liblinear')`.
 - **Match-Grouped Dataset Split**: Trained on **106,309 deliveries** across 927 IPL matches. Evaluated with a strict `GroupShuffleSplit` on `match_id` (741 training matches, **186 completely unseen test matches**), ensuring **zero temporal or match context leakage**.
 - **Performance vs Baselines**:
@@ -75,14 +75,8 @@ graph TD
   - **Brier Score**: **0.1453** (vs. 0.4566 on majority baseline).
   - **Expected Calibration Error (ECE)**: **0.0224** across 10 probability bins.
   - **CPU Inference Latency**: **4.03 ms** median (p50), **6.07 ms** (p95), **8.47 ms** (p99) across 1,000 trials on CPU.
-- **Cryptographic Artifact Integrity**: Model artifact `pipe.pkl` verified with cryptographic SHA-256 (`011445c41ac5...`) on load before unpickling to protect against tampering.
-- **Cricket Math Formulation**:
-  $$\text{balls\_left} = 120 - \text{legal\_balls\_bowled}$$
-  $$\text{crr} = \begin{cases} \frac{\text{current\_score} \times 6}{\text{legal\_balls\_bowled}} & \text{legal\_balls\_bowled} > 0 \\ 0.0 & \text{legal\_balls\_bowled} = 0 \end{cases}$$
-  $$\text{rrr} = \frac{\text{runs\_left} \times 6}{\text{balls\_left}}$$
-  Protects against division-by-zero, handles completed innings, targets already reached, and zero balls remaining.
 
-### 2. Privacy-Guaranteed Local AI (Zero Egress)
+### 2. Privacy-Guaranteed Local AI
 - **Local Ollama Integration**: Runs local LLMs (e.g., `qwen3:4b`, `llama3.2`) with bounded agentic tool execution (maximum 5 iterative tool turns, 30s timeouts). Strict zero egress: external search tools removed.
 - **Local Speech-to-Text**: Browser `MediaRecorder` audio capture streamed to backend `faster-whisper` (`int8` CPU quantization). Streaming chunked upload limits (HTTP 413) and audio duration limits (120s) enforced. No transcripts or audio payloads ever leave your infrastructure.
 - **Client-Side TTS**: Synthesized in-browser using standard Web Speech API with automatic language auto-switching (English `en-US` and Hindi `hi-IN`).
@@ -109,8 +103,6 @@ The IPL win probability model was trained and evaluated using [`backend/app/ml/t
 | **Precision / Recall / F1** | 0.54 / 1.00 / 0.70 | 0.71 / 0.65 / 0.68 | **0.79 / 0.81 / 0.80** |
 | **Median Inference Latency (p50)** | — | — | **4.03 ms** |
 | **95th Percentile Latency (p95)** | — | — | **6.07 ms** |
-| **Artifact SHA-256** | — | — | `011445c41ac5de9072cca85cb821e880b5bd91622964842dae538b6a2c82d1d4` |
-
 ---
 
 ## 🛠️ Tech Stack
@@ -155,7 +147,6 @@ Using Docker Compose:
 ```bash
 docker compose up -d postgres
 ```
-*PostgreSQL will start on port `5433` (mapped from container `5432` to avoid host port conflicts) with user `genius` and database `genius_ai`.*
 
 ---
 
@@ -183,7 +174,6 @@ pip install -r backend/requirements.txt
 # Start backend server
 uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
-*Interactive Swagger API documentation is available at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).*
 
 ---
 
@@ -196,7 +186,6 @@ npm install
 # Start Vite development server
 npm run dev
 ```
-*Open [http://localhost:5173](http://localhost:5173) in your browser.*
 
 ---
 
@@ -228,37 +217,6 @@ npm run dev
 | :--- | :--- | :--- | :--- |
 | `POST` | `/api/v1/chat` | Bounded agentic tool loop | Server-Sent Events (`text/event-stream`) |
 | `POST` | `/api/v1/stt` | Local Whisper speech transcription | Multipart form data (`audio/wav`, `audio/webm`) |
-
----
-
-## 🧪 Testing & Verification
-
-The test suite validates ML edge cases, database persistence, agent loops, security boundaries, and speech processing:
-
-```bash
-# Run complete test suite with coverage
-pytest backend/tests/ -v
-```
-
-### Test Coverage Highlights
-- `test_health.py`: Liveness returns 200; readiness returns 503 when database is unavailable.
-- `test_ipl_inference.py`: Verified win probabilities sum to ~1.0; 0 balls left, 0 overs, target reached, and invalid teams handled gracefully.
-- `test_persistence.py`: CRUD operations for tasks and reminders; persistence across commits; user isolation.
-- `test_agent_loop.py` & `test_tools.py`: Tool execution (IPL prediction, task creation, web search, app opening) and maximum iteration cap (5 turns).
-- `test_security.py`: Local vs. public profile behavior, CORS header validation, production safety gates.
-- `test_stt.py`: Transcription service fallback, language detection, and audio validation.
-
----
-
-## 💼 AI Engineer Resume & Portfolio Highlights
-
-If featuring this project on your resume or portfolio:
-
-- **Modular Monolith & Microservices Migration**: Replaced legacy multi-runtime prototype (Flask + Express) with an asynchronous FastAPI modular monolith adhering to Clean Architecture principles.
-- **Production ML Deployment**: Serialized, calibrated, and served a scikit-learn win probability pipeline trained on 106k+ IPL deliveries, maintaining < 2ms p95 latency and rigorous mathematical boundary handling.
-- **Local Agentic AI with Tool Calling**: Built an iterative tool-calling loop over local Ollama models (`qwen3:4b`), integrating dynamic schema validation and multi-turn execution limits.
-- **Privacy-First Multimodal Pipeline**: Eliminated external API egress by pairing in-browser `MediaRecorder` audio capture with local `faster-whisper` transcription and native speech synthesis.
-- **Defensive Production Engineering**: Designed dual security profiles, async PostgreSQL persistence with fail-fast HTTP 503 error handling, Docker Compose orchestration, and automated CI pipelines.
 
 ---
 
