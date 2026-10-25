@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { ListChecks, Plus, Trash2, CheckCircle, Circle, Loader2, AlertCircle } from 'lucide-react';
 import { fetchTasks, createTask, updateTask, deleteTask, TaskItem } from '../../services/api';
+import { useNotifications } from '../../context/NotificationContext';
 
 const TasksPanel: React.FC = () => {
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [newTask, setNewTask] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { showToast } = useNotifications();
 
   const loadTasks = async () => {
     try {
@@ -32,6 +34,7 @@ const TasksPanel: React.FC = () => {
       const created = await createTask(newTask.trim());
       setTasks((prev) => [created, ...prev]);
       setNewTask('');
+      showToast('Task Created', `"${created.title}" added to your tasks.`, 'info');
     } catch (err: any) {
       setError(err.message || 'Failed to create task');
     }
@@ -41,6 +44,9 @@ const TasksPanel: React.FC = () => {
     try {
       const updated = await updateTask(id, { completed: !currentCompleted });
       setTasks((prev) => prev.map((t) => (t.id === id ? updated : t)));
+      if (!currentCompleted) {
+        showToast('Task Completed', `"${updated.title}" marked as complete!`, 'success');
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to update task');
     }
@@ -48,8 +54,10 @@ const TasksPanel: React.FC = () => {
 
   const handleRemove = async (id: string) => {
     try {
+      const target = tasks.find((t) => t.id === id);
       await deleteTask(id);
       setTasks((prev) => prev.filter((t) => t.id !== id));
+      showToast('Task Removed', `"${target?.title || 'Task'}" was deleted.`, 'info');
     } catch (err: any) {
       setError(err.message || 'Failed to delete task');
     }

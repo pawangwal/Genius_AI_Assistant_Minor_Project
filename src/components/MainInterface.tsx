@@ -5,10 +5,11 @@ import SystemStatusCards from './SystemStatusCards';
 import NavigationSidebar from './NavigationSidebar';
 import VoiceActivationButton from './VoiceActivationButton';
 import TasksPanel from './panels/TasksPanel';
-import RemindersPanel from './panels/RemindersPanel';;
+import RemindersPanel from './panels/RemindersPanel';
 import SmartDevicesPanel from './panels/SmartDevicesPanel';
 import IPLPredictorPanel from './panels/IPLPredictorPanel';
 import SettingsPanel from './panels/SettingsPanel';
+import ChatPanel from './panels/ChatPanel';
 import { useInterface } from '../context/InterfaceContext';
 
 const MainInterface = () => {
@@ -16,6 +17,8 @@ const MainInterface = () => {
 
   const renderPanel = () => {
     switch (activePanel) {
+      case 'chat':
+        return <ChatPanel />;
       case 'tasks':
         return <TasksPanel />;
       case 'reminders':

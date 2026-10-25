@@ -141,3 +141,85 @@ export async function deleteReminder(id: string): Promise<void> {
   });
   if (!resp.ok) throw new Error('Failed to delete reminder');
 }
+
+export interface NetworkStatusResponse {
+  fastapi: string;
+  provider: string;
+  status: 'connected' | 'checking' | 'degraded' | 'offline';
+  detail: string;
+  model: string;
+}
+
+export async function fetchNetworkStatus(): Promise<NetworkStatusResponse> {
+  const resp = await fetch(`${API_BASE_URL}/api/v1/health/network`);
+  if (!resp.ok) {
+    throw new Error('Network health probe failed');
+  }
+  return await resp.json();
+}
+
+export interface CricketInningScore {
+  runs: number;
+  wickets: number;
+  overs: number;
+  inning: string;
+}
+
+export interface CricketMatch {
+  id: string;
+  name: string;
+  teams: string[];
+  match_type: string;
+  scores: CricketInningScore[];
+  status: string;
+  venue: string;
+  date: string;
+  match_ended: boolean;
+}
+
+export interface CricketScoresResponse {
+  status: 'success' | 'empty' | 'error';
+  message?: string;
+  matches: CricketMatch[];
+}
+
+export async function fetchCricketScores(): Promise<CricketScoresResponse> {
+  const resp = await fetch(`${API_BASE_URL}/api/v1/cricket/scores`);
+  if (!resp.ok) {
+    throw new Error(`Cricket score request failed with HTTP ${resp.status}`);
+  }
+  return await resp.json();
+}
+
+export interface ExtractedFileResult {
+  filename: string;
+  file_type: string;
+  size_bytes: number;
+  char_count: number;
+  text_content: string;
+  truncated: boolean;
+}
+
+export async function uploadChatAttachment(file: File): Promise<ExtractedFileResult> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const resp = await fetch(`${API_BASE_URL}/api/v1/chat/upload`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!resp.ok) {
+    let errMsg = `Upload failed with HTTP ${resp.status}`;
+    try {
+      const errData = await resp.json();
+      if (errData.detail) errMsg = errData.detail;
+    } catch {
+      // ignore
+    }
+    throw new Error(errMsg);
+  }
+
+  return await resp.json();
+}
+

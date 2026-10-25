@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     OPENROUTER_MODEL: str = Field(default="nvidia/nemotron-3.5-lightning:free", description="OpenRouter free model identifier")
     OPENROUTER_BASE_URL: str = Field(default="https://openrouter.ai/api/v1", description="OpenRouter API base URL")
 
+    # CricAPI Live Cricket Scores Configuration
+    CRICAPI_KEY: Optional[str] = Field(default=None, description="CricAPI access key for live cricket scores")
+
     # Local Ollama AI Settings (Alternative local provider)
     OLLAMA_BASE_URL: str = Field(default="http://127.0.0.1:11434")
     OLLAMA_CHAT_MODEL: str = Field(default="llama3.2")
@@ -255,7 +258,7 @@ class Settings(BaseSettings):
         for k, v in self.__dict__.items():
             if k.startswith("_"):
                 continue
-            if k in ("SECRET_KEY", "POSTGRES_PASSWORD", "POSTGRES_TEST_PASSWORD", "OPENROUTER_API_KEY"):
+            if k in ("SECRET_KEY", "POSTGRES_PASSWORD", "POSTGRES_TEST_PASSWORD", "OPENROUTER_API_KEY", "CRICAPI_KEY"):
                 fields.append(f"{k}='**********'")
             elif k == "DATABASE_URL":
                 fields.append(f"{k}='{self.masked_database_url}'")

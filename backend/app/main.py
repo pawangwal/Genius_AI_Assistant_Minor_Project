@@ -44,17 +44,14 @@ async def lifespan(app: FastAPI):
             logger.critical("Production startup halted: database schema not ready.")
     else:
         logger.info("Database connectivity and schema tables verified.")
-        # In local development profile, ensure local seed user exists
-        if not settings.AUTH_REQUIRED:
+        # In local development profile, ensure local seed user and demo items exist
+        if not settings.AUTH_REQUIRED and not settings.is_production:
             try:
-                async with AsyncSessionLocal() as session:
-                    result = await session.execute(select(UserEntity).where(UserEntity.id == "local-user"))
-                    if not result.scalar_one_or_none():
-                        session.add(UserEntity(id="local-user", username="local_developer"))
-                        await session.commit()
-                        logger.info("Local development seed user initialized.")
+                from scripts.seed_demo_data import seed_demo_data
+                await seed_demo_data()
+                logger.info("Local development seed user and demonstration items verified.")
             except Exception as seed_err:
-                logger.warning(f"Failed to seed local-user: {seed_err}")
+                logger.warning(f"Development demo seeding skipped: {seed_err}")
 
     yield
 
@@ -93,6 +90,14 @@ async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
 
 # Master API v1 Router
 app.include_router(api_v1_router)
+
+# Direct alias for /api/cricket/scores
+from backend.app.api.v1.cricket import fetch_cricapi_scores, CricketScoresResponse
+
+@app.get("/api/cricket/scores", response_model=CricketScoresResponse, tags=["Cricket"])
+async def get_cricket_scores_alias() -> CricketScoresResponse:
+    """Direct alias endpoint for /api/cricket/scores."""
+    return await fetch_cricapi_scores()
 
 @app.get("/", tags=["Root"])
 async def root():

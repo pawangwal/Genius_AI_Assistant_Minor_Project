@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Bell, Plus, Trash2, CheckCircle, Circle, Loader2, AlertCircle } from 'lucide-react';
 import { fetchReminders, createReminder, deleteReminder, ReminderItem } from '../../services/api';
+import { useNotifications } from '../../context/NotificationContext';
 
 const RemindersPanel: React.FC = () => {
   const [reminders, setReminders] = useState<ReminderItem[]>([]);
@@ -8,6 +9,7 @@ const RemindersPanel: React.FC = () => {
   const [newDateTime, setNewDateTime] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { showToast, browserPermission, requestBrowserPermission } = useNotifications();
 
   const loadReminders = async () => {
     try {
@@ -33,6 +35,7 @@ const RemindersPanel: React.FC = () => {
         setReminders((prev) => [created, ...prev]);
         setNewReminder('');
         setNewDateTime('');
+        showToast('Reminder Scheduled', `"${created.title}" scheduled for ${created.due_time}.`, 'reminder');
       } catch (err: any) {
         setError(err.message || 'Failed to create reminder');
       }
@@ -41,8 +44,10 @@ const RemindersPanel: React.FC = () => {
 
   const handleRemove = async (id: string) => {
     try {
+      const target = reminders.find((r) => r.id === id);
       await deleteReminder(id);
       setReminders((prev) => prev.filter((r) => r.id !== id));
+      showToast('Reminder Dismissed', `"${target?.title || 'Reminder'}" was dismissed.`, 'info');
     } catch (err: any) {
       setError(err.message || 'Failed to delete reminder');
     }
@@ -58,7 +63,17 @@ const RemindersPanel: React.FC = () => {
             <p className="text-xs text-purple-600">PostgreSQL-backed async reminders store</p>
           </div>
         </div>
-        {loading && <Loader2 className="animate-spin text-purple-400" size={18} />}
+        <div className="flex items-center gap-2">
+          {browserPermission === 'default' && (
+            <button
+              onClick={requestBrowserPermission}
+              className="text-[11px] text-purple-300 bg-purple-950/60 border border-purple-800/60 hover:bg-purple-900/50 px-2.5 py-1 rounded-md transition-colors"
+            >
+              Enable Browser Alerts
+            </button>
+          )}
+          {loading && <Loader2 className="animate-spin text-purple-400" size={18} />}
+        </div>
       </div>
 
       {error && (

@@ -1,77 +1,140 @@
 import React, { useState, useEffect } from 'react';
-import { Cpu, MemoryStick as Memory, Thermometer, Clock, Wifi, CircleOff } from 'lucide-react';
+import { Cpu, MemoryStick as Memory, Clock, Wifi, CircleOff, AlertTriangle } from 'lucide-react';
+import { fetchNetworkStatus, NetworkStatusResponse } from '../services/api';
 
 const SystemStatusCards: React.FC = () => {
   const [time, setTime] = useState(new Date());
-  const [cpuUsage, setCpuUsage] = useState(0);
-  const [memoryUsage, setMemoryUsage] = useState(0);
-  const [temperature, setTemperature] = useState(0);
-  const [isOnline, setIsOnline] = useState(true);
+  const [cpuUsage, setCpuUsage] = useState(14);
+  const [memoryUsage, setMemoryUsage] = useState(48);
+  const [networkStatus, setNetworkStatus] = useState<NetworkStatusResponse>({
+    fastapi: 'online',
+    provider: 'checking',
+    status: 'checking',
+    detail: 'Verifying AI provider connectivity...',
+    model: 'loading...',
+  });
 
-  // Update time every second
+  // Update clock every second
   useEffect(() => {
     const timer = setInterval(() => {
       setTime(new Date());
     }, 1000);
-    
     return () => clearInterval(timer);
   }, []);
 
-  // Simulate changing system metrics
+  // Simulate local CPU & Memory telemetry
   useEffect(() => {
     const updateMetrics = () => {
-      setCpuUsage(Math.floor(10 + Math.random() * 30));
-      setMemoryUsage(Math.floor(40 + Math.random() * 20));
-      setTemperature(Math.floor(60 + Math.random() * 20));
-      setIsOnline(Math.random() > 0.05); // Occasionally go offline
+      setCpuUsage(Math.floor(12 + Math.random() * 18));
+      setMemoryUsage(Math.floor(45 + Math.random() * 10));
     };
-    
-    updateMetrics();
-    const interval = setInterval(updateMetrics, 3000);
-    
+
+    const interval = setInterval(updateMetrics, 4000);
     return () => clearInterval(interval);
   }, []);
 
+  // Real LLM Provider & Network polling
+  useEffect(() => {
+    let isCancelled = false;
+
+    const pollNetwork = async () => {
+      try {
+        const data = await fetchNetworkStatus();
+        if (!isCancelled) {
+          setNetworkStatus(data);
+        }
+      } catch {
+        if (!isCancelled) {
+          setNetworkStatus({
+            fastapi: 'offline',
+            provider: 'unknown',
+            status: 'offline',
+            detail: 'Backend server unreachable (http://127.0.0.1:8000)',
+            model: 'none',
+          });
+        }
+      }
+    };
+
+    pollNetwork();
+    const interval = setInterval(pollNetwork, 10000); // 10s polling
+
+    return () => {
+      isCancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Resolve Network card visual properties
+  const getNetworkCardProps = () => {
+    switch (networkStatus.status) {
+      case 'connected':
+        return {
+          icon: <Wifi size={16} />,
+          value: 'Connected',
+          detail: `${networkStatus.provider.toUpperCase()} (${networkStatus.model.split('/')[1] || networkStatus.model})`,
+          color: 'green' as const,
+        };
+      case 'degraded':
+        return {
+          icon: <AlertTriangle size={16} />,
+          value: 'Degraded',
+          detail: networkStatus.detail,
+          color: 'amber' as const,
+        };
+      case 'offline':
+        return {
+          icon: <CircleOff size={16} />,
+          value: 'Offline',
+          detail: networkStatus.detail,
+          color: 'red' as const,
+        };
+      case 'checking':
+      default:
+        return {
+          icon: <Wifi size={16} className="animate-pulse" />,
+          value: 'Checking...',
+          detail: 'Connecting to AI provider...',
+          color: 'cyan' as const,
+        };
+    }
+  };
+
+  const netCard = getNetworkCardProps();
+
   return (
-    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-      <StatusCard 
+    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-4 gap-3 w-full">
+      <StatusCard
         icon={<Clock size={16} />}
         title="System Time"
         value={time.toLocaleTimeString()}
         detail={time.toLocaleDateString()}
         color="cyan"
       />
-      
-      <StatusCard 
+
+      <StatusCard
         icon={<Cpu size={16} />}
         title="CPU Usage"
         value={`${cpuUsage}%`}
-        detail={cpuUsage > 25 ? "High" : "Normal"}
-        color={cpuUsage > 25 ? "amber" : "green"}
+        detail={cpuUsage > 25 ? 'High Activity' : 'Normal Load'}
+        color={cpuUsage > 25 ? 'amber' : 'green'}
       />
-      
-      <StatusCard 
+
+      <StatusCard
         icon={<Memory size={16} />}
         title="Memory"
         value={`${memoryUsage}%`}
-        detail={`${(16 * memoryUsage / 100).toFixed(1)}GB / 16GB`}
-        color={memoryUsage > 50 ? "amber" : "green"}
+        detail={`${((16 * memoryUsage) / 100).toFixed(1)}GB / 16GB`}
+        color={memoryUsage > 50 ? 'amber' : 'green'}
       />
-      
-      <StatusCard 
-        icon={<Thermometer size={16} />}
-        title="Temperature"
-        value={`${temperature}°F`}
-        detail={temperature > 70 ? "Caution" : "Normal"}
-        color={temperature > 70 ? "amber" : "green"}
-      />
-      
-      <StatusCard 
-        icon={isOnline ? <Wifi size={16} /> : <CircleOff size={16} />}
+
+      <StatusCard
+        icon={netCard.icon}
         title="Network"
-        value={isOnline ? "Online" : "Offline"}
-        detail={isOnline ? "Connected" : "No Connection"}
-        color={isOnline ? "green" : "red"}
+        value={netCard.value}
+        detail={netCard.detail}
+        color={netCard.color}
+        tooltip={networkStatus.detail}
       />
     </div>
   );
@@ -83,9 +146,10 @@ interface StatusCardProps {
   value: string;
   detail: string;
   color: 'cyan' | 'green' | 'amber' | 'red';
+  tooltip?: string;
 }
 
-const StatusCard: React.FC<StatusCardProps> = ({ icon, title, value, detail, color }) => {
+const StatusCard: React.FC<StatusCardProps> = ({ icon, title, value, detail, color, tooltip }) => {
   const getColorClasses = () => {
     switch (color) {
       case 'cyan':
@@ -102,13 +166,16 @@ const StatusCard: React.FC<StatusCardProps> = ({ icon, title, value, detail, col
   };
 
   return (
-    <div className={`p-3 rounded-lg bg-gradient-to-br ${getColorClasses()} backdrop-blur-md border border-opacity-50 shadow-lg`}>
+    <div
+      title={tooltip || detail}
+      className={`p-3 rounded-lg bg-gradient-to-br ${getColorClasses()} backdrop-blur-md border border-opacity-50 shadow-lg transition-all`}
+    >
       <div className="flex items-center mb-1">
         <div className="mr-2">{icon}</div>
         <div className="text-xs font-semibold opacity-80">{title}</div>
       </div>
-      <div className="font-mono text-lg font-bold">{value}</div>
-      <div className="text-xs opacity-70">{detail}</div>
+      <div className="font-mono text-lg font-bold truncate">{value}</div>
+      <div className="text-xs opacity-70 truncate">{detail}</div>
     </div>
   );
 };

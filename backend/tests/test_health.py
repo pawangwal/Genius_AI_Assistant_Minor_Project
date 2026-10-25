@@ -54,3 +54,36 @@ async def test_readiness_probe_model_unloaded(async_client):
             data = resp.json()
             assert data["status"] == "unready"
             assert data["dependencies"]["ipl_model"] == "unloaded"
+
+@pytest.mark.asyncio
+async def test_network_health_probe_openrouter_connected(async_client):
+    """Network probe returns connected status when OpenRouter is authenticated."""
+    mock_avail = {
+        "configured": True,
+        "reachable": True,
+        "authenticated": True,
+        "model": "nvidia/nemotron-3.5-lightning:free",
+        "detail": "OpenRouter authenticated and available."
+    }
+    with patch("backend.app.services.openrouter_provider.openrouter_provider.check_availability", return_value=mock_avail):
+        resp = await async_client.get("/api/v1/health/network")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["fastapi"] == "online"
+        assert data["provider"] == "openrouter"
+        assert data["status"] == "connected"
+        assert "OpenRouter connected" in data["detail"]
+
+@pytest.mark.asyncio
+async def test_network_health_probe_ollama_offline(async_client):
+    """Network probe returns offline status when Ollama daemon is unreachable."""
+    with patch("backend.app.core.config.settings.LLM_PROVIDER", "ollama"):
+        with patch("backend.app.services.ollama_provider.ollama_provider.check_health", return_value=False):
+            resp = await async_client.get("/api/v1/health/network")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["fastapi"] == "online"
+            assert data["provider"] == "ollama"
+            assert data["status"] == "offline"
+            assert "unreachable" in data["detail"].lower()
+

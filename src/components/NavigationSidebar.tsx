@@ -5,6 +5,7 @@ import {
   Bell, 
   Lightbulb,
   MessageSquare,
+  Terminal,
   Trophy,
   Settings,
   ChevronLeft,
@@ -12,16 +13,18 @@ import {
 } from 'lucide-react';
 import { useInterface } from '../context/InterfaceContext';
 import VoiceActivationButton from './VoiceActivationButton';
+import CricketScoresWidget from './CricketScoresWidget';
 
 const NavigationSidebar: React.FC = () => {
   const { sidebarExpanded, setSidebarExpanded, activePanel, setActivePanel } = useInterface();
   
   const navItems = [
     { id: 'home', icon: Home, label: 'Home' },
+    { id: 'chat', icon: MessageSquare, label: 'Chat' },
     { id: 'tasks', icon: ListChecks, label: 'Tasks' },
     { id: 'reminders', icon: Bell, label: 'Reminders' },
     { id: 'devices', icon: Lightbulb, label: 'Smart Devices' },
-    { id: 'console', icon: MessageSquare, label: 'Command Console' },
+    { id: 'console', icon: Terminal, label: 'Command Console' },
     { id: 'ipl', icon: Trophy, label: 'IPL Predictor' },
     { id: 'settings', icon: Settings, label: 'Settings' },
   ] as const;
@@ -41,17 +44,21 @@ const NavigationSidebar: React.FC = () => {
         )}
       </div>
       
-      <div className="flex-1 py-6">
+      <div className="flex-1 py-4 overflow-y-auto overflow-x-hidden">
         {navItems.map((item) => (
-          <NavItem 
-            key={item.id}
-            id={item.id}
-            Icon={item.icon}
-            label={item.label}
-            active={activePanel === item.id}
-            expanded={sidebarExpanded}
-            onClick={() => setActivePanel(item.id)}
-          />
+          <React.Fragment key={item.id}>
+            {item.id === 'ipl' && (
+              <CricketScoresWidget expanded={sidebarExpanded} />
+            )}
+            <NavItem 
+              id={item.id}
+              Icon={item.icon}
+              label={item.label}
+              active={activePanel === item.id}
+              expanded={sidebarExpanded}
+              onClick={() => setActivePanel(item.id)}
+            />
+          </React.Fragment>
         ))}
       </div>
       

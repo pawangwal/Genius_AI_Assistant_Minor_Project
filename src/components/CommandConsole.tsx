@@ -75,23 +75,36 @@ const CommandConsole: React.FC = () => {
     window.speechSynthesis.speak(utterance);
   };
 
+  const wasListeningRef = useRef(false);
+
+  // Component unmount cleanup
+  useEffect(() => {
+    return () => {
+      recorderRef.current.cleanup();
+    };
+  }, []);
+
   // Browser MediaRecorder voice capture flow
   useEffect(() => {
     let isCancelled = false;
 
     const handleVoiceCapture = async () => {
-      if (isListening) {
+      // Transition from idle -> listening
+      if (isListening && !wasListeningRef.current) {
+        wasListeningRef.current = true;
         try {
           await recorderRef.current.startRecording();
         } catch (err: any) {
-          addMessage(err.message || 'Microphone access denied.', 'assistant');
+          wasListeningRef.current = false;
           setIsListening(false);
+          addMessage(err.message || 'Microphone access denied.', 'assistant');
         }
-      } else {
-        // User stopped listening: finish recording and upload
+      } else if (!isListening && wasListeningRef.current) {
+        // Transition from listening -> stop
+        wasListeningRef.current = false;
         try {
           const audioBlob = await recorderRef.current.stopRecording();
-          if (!isCancelled && audioBlob.size > 0) {
+          if (!isCancelled && audioBlob && audioBlob.size > 0) {
             setIsLoading(true);
             addMessage('Transcribing audio locally...', 'assistant');
 
