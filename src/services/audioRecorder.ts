@@ -136,10 +136,16 @@ export class AudioRecorderService {
   }
 }
 
-export async function uploadAndTranscribeAudio(audioBlob: Blob): Promise<{ text: string; language: string }> {
+export async function uploadAndTranscribeAudio(
+  audioBlob: Blob,
+  language?: string
+): Promise<{ text: string; language: string; duration_seconds?: number }> {
   const formData = new FormData();
   const ext = audioBlob.type.includes('wav') ? 'wav' : audioBlob.type.includes('ogg') ? 'ogg' : 'webm';
   formData.append('file', audioBlob, `recording.${ext}`);
+  if (language && language !== 'auto') {
+    formData.append('language', language);
+  }
 
   const response = await fetch(`${API_BASE_URL}/api/v1/stt`, {
     method: 'POST',

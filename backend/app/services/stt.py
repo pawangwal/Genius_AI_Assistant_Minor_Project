@@ -1,5 +1,6 @@
 """Local Speech-to-Text (STT) service providing bounded, offline transcription using faster-whisper."""
 import os
+import time
 import asyncio
 import tempfile
 import logging
@@ -133,8 +134,18 @@ class LocalSTTService:
     def is_ready(self) -> bool:
         return self._is_loaded and self.model is not None
 
-    async def transcribe_audio_bytes(self, audio_bytes: bytes, filename: str = "audio.webm") -> Dict[str, Any]:
-        """Transcribes raw audio bytes locally under concurrency limits and pre-inference duration bounds."""
+    async def transcribe_audio_bytes(
+        self,
+        audio_bytes: bytes,
+        filename: str = "audio.webm",
+        language: Optional[str] = "auto"
+    ) -> Dict[str, Any]:
+        """Transcribes raw audio bytes locally under concurrency limits and pre-inference duration bounds.
+        
+        Supports optional language hints ('auto', 'en', 'hi'). Eagerly consumes Faster-Whisper's
+        lazy segment generator within the thread executor to measure full latency and keep the
+        main event loop unblocked.
+        """
         if len(audio_bytes) > settings.STT_MAX_UPLOAD_BYTES:
             raise ValueError(
                 f"Audio file exceeds maximum allowed size ({settings.STT_MAX_UPLOAD_BYTES // (1024 * 1024)} MB)."
@@ -170,17 +181,27 @@ class LocalSTTService:
                     if not loaded:
                         raise RuntimeError("Local speech-to-text model is unavailable.")
 
-                # Run transcription in threadpool to avoid blocking the async event loop
-                loop = asyncio.get_running_loop()
-                segments, info = await loop.run_in_executor(
-                    None,
-                    lambda: self.model.transcribe(
+                # Resolve language hint ('auto' -> None for Whisper auto-detection)
+                whisper_lang = None if language in (None, "", "auto") else language.strip().lower()
+
+                # Run transcription and full segment iteration in threadpool to avoid blocking event loop
+                def _execute_transcription():
+                    t_start = time.perf_counter()
+                    segments, info = self.model.transcribe(
                         temp_path,
                         beam_size=5,
-                        language=None,  # Auto-detect language (Hindi or English)
-                        vad_filter=True
+                        language=whisper_lang,
+                        vad_filter=True,
+                        condition_on_previous_text=False
                     )
-                )
+                    # Eagerly consume the lazy segment generator inside the worker thread
+                    segment_list = list(segments)
+                    text = " ".join([segment.text.strip() for segment in segment_list]).strip()
+                    elapsed_ms = round((time.perf_counter() - t_start) * 1000, 2)
+                    return text, info, elapsed_ms
+
+                loop = asyncio.get_running_loop()
+                transcribed_text, info, latency_ms = await loop.run_in_executor(None, _execute_transcription)
 
                 # Duration bounds validation (post-inference defense-in-depth)
                 duration = round(float(info.duration), 2)
@@ -190,15 +211,14 @@ class LocalSTTService:
                         f"{settings.STT_MAX_DURATION_SECONDS}s."
                     )
 
-                # Collect segment text
-                transcribed_text = " ".join([segment.text.strip() for segment in segments]).strip()
                 detected_lang = info.language
 
                 return {
                     "status": "success",
                     "text": transcribed_text,
                     "language": detected_lang,
-                    "duration_seconds": duration
+                    "duration_seconds": duration,
+                    "latency_ms": latency_ms
                 }
 
             finally:

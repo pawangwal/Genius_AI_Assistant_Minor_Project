@@ -153,4 +153,69 @@ def test_stt_browser_streaming_webm_duration_probing(tmp_path):
     assert duration is not None
     assert round(duration, 1) == 2.0
 
+@pytest.mark.asyncio
+async def test_stt_language_hint_validation_and_rejection(async_client):
+    """STT API validates language hints against allowed options (auto, en, hi) and rejects others with 400."""
+    with patch("backend.app.api.v1.stt.stt_service.transcribe_audio_bytes", new_callable=AsyncMock) as mock_transcribe:
+        mock_transcribe.return_value = {
+            "status": "success",
+            "text": "Hello world",
+            "language": "en",
+            "duration_seconds": 1.0,
+            "latency_ms": 45.2
+        }
+
+        # 1. Valid language hints: en, hi, auto
+        for valid_lang in ("en", "hi", "auto"):
+            files = {"file": ("query.wav", b"RIFF....audio_bytes", "audio/wav")}
+            data = {"language": valid_lang}
+            resp = await async_client.post("/api/v1/stt", files=files, data=data)
+            assert resp.status_code == 200
+            assert resp.json()["status"] == "success"
+            mock_transcribe.assert_called_with(b"RIFF....audio_bytes", filename="query.wav", language=valid_lang)
+
+        # 2. Unsupported language hint (e.g. 'ru' or 'es') returns HTTP 400
+        files = {"file": ("query.wav", b"RIFF....audio_bytes", "audio/wav")}
+        data = {"language": "ru"}
+        resp = await async_client.post("/api/v1/stt", files=files, data=data)
+        assert resp.status_code == 400
+        assert "Unsupported language hint 'ru'" in resp.json()["detail"]
+        assert "Allowed: auto, en, hi" in resp.json()["detail"]
+
+@pytest.mark.asyncio
+async def test_stt_transcribe_audio_bytes_language_propagation_and_latency():
+    """LocalSTTService resolves language hints properly to Whisper and records latency_ms."""
+    from backend.app.services.stt import LocalSTTService
+    from unittest.mock import MagicMock
+
+    service = LocalSTTService()
+    service._is_loaded = True
+
+    mock_segment = MagicMock()
+    mock_segment.text = "Hello from Genius"
+    mock_info = MagicMock()
+    mock_info.duration = 1.8
+    mock_info.language = "en"
+
+    mock_whisper = MagicMock()
+    mock_whisper.transcribe.return_value = ([mock_segment], mock_info)
+    service.model = mock_whisper
+
+    with patch("backend.app.services.stt.probe_audio_duration", return_value=1.8):
+        # A. Explicit 'en' language hint
+        res_en = await service.transcribe_audio_bytes(b"dummy_bytes", "sample.wav", language="en")
+        assert res_en["text"] == "Hello from Genius"
+        assert res_en["language"] == "en"
+        assert "latency_ms" in res_en
+        assert res_en["latency_ms"] >= 0
+        call_kwargs = mock_whisper.transcribe.call_args.kwargs
+        assert call_kwargs["language"] == "en"
+        assert call_kwargs["condition_on_previous_text"] is False
+
+        # B. 'auto' language hint passes None to Whisper for auto-detection
+        res_auto = await service.transcribe_audio_bytes(b"dummy_bytes", "sample.wav", language="auto")
+        assert res_auto["text"] == "Hello from Genius"
+        call_kwargs_auto = mock_whisper.transcribe.call_args.kwargs
+        assert call_kwargs_auto["language"] is None
+
 

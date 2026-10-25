@@ -1,7 +1,8 @@
 """Speech-to-Text (STT) file upload API endpoint with streaming bounds and error sanitization."""
 import os
 import logging
-from fastapi import APIRouter, UploadFile, File, HTTPException, status
+from typing import Optional
+from fastapi import APIRouter, UploadFile, File, Form, Query, HTTPException, status
 from backend.app.services.stt import stt_service
 from backend.app.core.config import settings
 
@@ -10,15 +11,29 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/stt", tags=["Speech Recognition"])
 
 ALLOWED_AUDIO_EXTENSIONS = {".webm", ".wav", ".mp3", ".ogg", ".m4a"}
+ALLOWED_LANGUAGES = {"auto", "en", "hi"}
 UPLOAD_CHUNK_SIZE = 64 * 1024  # 64 KB chunks
 
 @router.post("", status_code=status.HTTP_200_OK)
-async def transcribe_audio(file: UploadFile = File(...)):
+async def transcribe_audio(
+    file: UploadFile = File(...),
+    language: Optional[str] = Form(None),
+    lang_query: Optional[str] = Query(None, alias="language")
+):
     """Transcribes client-recorded audio entirely offline using local Whisper.
     
+    Supports optional language hints ('auto', 'en', 'hi').
     Enforces bounded streaming chunk reads to prevent memory exhaustion DoS attacks,
     validates audio format, and delegates to the bounded LocalSTTService.
     """
+    # 0. Validate language hint
+    raw_lang = (language or lang_query or "auto").strip().lower()
+    if raw_lang not in ALLOWED_LANGUAGES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported language hint '{raw_lang}'. Allowed: {', '.join(sorted(ALLOWED_LANGUAGES))}"
+        )
+
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext and ext not in ALLOWED_AUDIO_EXTENSIONS:
         raise HTTPException(
@@ -54,7 +69,11 @@ async def transcribe_audio(file: UploadFile = File(...)):
 
     # 2. Execute local transcription under concurrency semaphore and duration checks
     try:
-        result = await stt_service.transcribe_audio_bytes(content, filename=file.filename or "audio.webm")
+        result = await stt_service.transcribe_audio_bytes(
+            content,
+            filename=file.filename or "audio.webm",
+            language=raw_lang
+        )
         return result
     except ValueError as e:
         logger.warning(f"Validation failure during STT processing: {e}")

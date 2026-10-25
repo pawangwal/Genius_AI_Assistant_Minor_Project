@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Terminal, Send, WifiOff, Loader2, Mic, MicOff, Wrench, AlertCircle } from 'lucide-react';
+import { Terminal, Send, WifiOff, Loader2, Mic, MicOff, Wrench, AlertCircle, Square, Volume2 } from 'lucide-react';
 import { useInterface } from '../context/InterfaceContext';
 import { useStore } from '../store/useStore';
 import { AudioRecorderService, uploadAndTranscribeAudio } from '../services/audioRecorder';
@@ -12,11 +12,16 @@ const CommandConsole: React.FC = () => {
   const [inputText, setInputText] = useState('');
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [sttLanguage, setSttLanguage] = useState<'auto' | 'en' | 'hi'>('auto');
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [activeTool, setActiveTool] = useState<string | null>(null);
 
   const consoleRef = useRef<HTMLDivElement>(null);
   const recorderRef = useRef<AudioRecorderService>(new AudioRecorderService());
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const generationIdRef = useRef<number>(0);
+  const wasListeningRef = useRef(false);
 
   // Check backend server readiness probe periodically
   useEffect(() => {
@@ -50,9 +55,12 @@ const CommandConsole: React.FC = () => {
     }
   }, [messages, activeTool]);
 
-  // Client-side Text-to-Speech with Hindi auto-detection
-  const speakText = (text: string) => {
+  // Client-side Text-to-Speech with Hindi auto-detection and generation guard
+  const speakText = (text: string, expectedGenId: number) => {
     if (!window.speechSynthesis) return;
+
+    // Reject speech if this generation was invalidated or superseded
+    if (generationIdRef.current !== expectedGenId) return;
 
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
@@ -72,14 +80,65 @@ const CommandConsole: React.FC = () => {
     }
 
     utterance.rate = 1.05;
+
+    utterance.onstart = () => {
+      if (generationIdRef.current === expectedGenId) {
+        setIsSpeaking(true);
+      } else {
+        window.speechSynthesis.cancel();
+        setIsSpeaking(false);
+      }
+    };
+
+    utterance.onend = () => {
+      setIsSpeaking(false);
+    };
+
+    utterance.onerror = () => {
+      setIsSpeaking(false);
+    };
+
     window.speechSynthesis.speak(utterance);
   };
 
-  const wasListeningRef = useRef(false);
+  // Immediate Stop and Interruption handler
+  const handleStop = () => {
+    // 1. Invalidate active generation so any late-arriving SSE events or speech are discarded
+    generationIdRef.current++;
+
+    // 2. Abort in-flight network request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+
+    // 3. Immediately silence browser speech synthesis
+    if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+
+    // 4. Reset active operation states
+    setIsSpeaking(false);
+    setIsLoading(false);
+    setActiveTool(null);
+  };
+
+  // Global Escape key shortcut to interrupt speech/generation
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && (isLoading || isSpeaking)) {
+        e.preventDefault();
+        handleStop();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isLoading, isSpeaking]);
 
   // Component unmount cleanup
   useEffect(() => {
     return () => {
+      handleStop();
       recorderRef.current.cleanup();
     };
   }, []);
@@ -106,9 +165,9 @@ const CommandConsole: React.FC = () => {
           const audioBlob = await recorderRef.current.stopRecording();
           if (!isCancelled && audioBlob && audioBlob.size > 0) {
             setIsLoading(true);
-            addMessage('Transcribing audio locally...', 'assistant');
+            addMessage(`Transcribing audio locally (${sttLanguage.toUpperCase()})...`, 'assistant');
 
-            const result = await uploadAndTranscribeAudio(audioBlob);
+            const result = await uploadAndTranscribeAudio(audioBlob, sttLanguage);
             if (result.text && result.text.trim()) {
               addMessage(result.text, 'user');
               await executeChatCompletion(result.text);
@@ -130,10 +189,18 @@ const CommandConsole: React.FC = () => {
     return () => {
       isCancelled = true;
     };
-  }, [isListening]);
+  }, [isListening, sttLanguage]);
 
-  // Execute chat with SSE Streaming and tool execution events
+  // Execute chat with SSE Streaming, AbortController, and Generation Guard
   const executeChatCompletion = async (userPrompt: string) => {
+    // 1. Prepare new generation lifecycle
+    const currentGenId = ++generationIdRef.current;
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setIsLoading(true);
     setActiveTool(null);
 
@@ -151,6 +218,7 @@ const CommandConsole: React.FC = () => {
           messages: conversationHistory,
           stream: true,
         }),
+        signal: controller.signal,
       });
 
       if (!response.ok) {
@@ -161,52 +229,83 @@ const CommandConsole: React.FC = () => {
       const decoder = new TextDecoder('utf-8');
       let assistantResponse = '';
       let currentEvent = '';
+      let lineBuffer = '';
 
       if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+        try {
+          while (true) {
+            // Guard: stop reading if generation was cancelled
+            if (generationIdRef.current !== currentGenId) {
+              await reader.cancel().catch(() => {});
+              return;
+            }
 
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n');
+            const { done, value } = await reader.read();
+            if (done) break;
 
-          for (const line of lines) {
-            if (line.startsWith('event: ')) {
-              currentEvent = line.replace('event: ', '').trim();
-            } else if (line.startsWith('data: ')) {
-              const dataStr = line.replace('data: ', '').trim();
-              try {
-                const data = JSON.parse(dataStr);
+            if (generationIdRef.current !== currentGenId) {
+              await reader.cancel().catch(() => {});
+              return;
+            }
 
-                if (currentEvent === 'tool_call') {
-                  setActiveTool(`Executing ${data.tool}...`);
-                } else if (currentEvent === 'tool_result') {
-                  setActiveTool(null);
-                  if (data.result?.action === 'client_navigate' && data.result?.url) {
-                    window.open(data.result.url, '_blank', 'noopener,noreferrer');
+            lineBuffer += decoder.decode(value, { stream: true });
+            const lines = lineBuffer.split('\n');
+            lineBuffer = lines.pop() || '';
+
+            for (const rawLine of lines) {
+              if (generationIdRef.current !== currentGenId) return;
+
+              const line = rawLine.trim();
+              if (!line) continue;
+
+              if (line.startsWith('event: ')) {
+                currentEvent = line.replace('event: ', '').trim();
+              } else if (line.startsWith('data: ')) {
+                const dataStr = line.replace('data: ', '').trim();
+                try {
+                  const data = JSON.parse(dataStr);
+
+                  if (currentEvent === 'tool_call') {
+                    setActiveTool(`Executing ${data.tool}...`);
+                  } else if (currentEvent === 'tool_result') {
+                    setActiveTool(null);
+                    if (data.result?.action === 'client_navigate' && data.result?.url) {
+                      window.open(data.result.url, '_blank', 'noopener,noreferrer');
+                    }
+                  } else if (currentEvent === 'token') {
+                    assistantResponse += (data.text || '');
+                  } else if (currentEvent === 'error') {
+                    throw new Error(data.error);
                   }
-                } else if (currentEvent === 'token') {
-                  assistantResponse += data.text;
-                } else if (currentEvent === 'error') {
-                  throw new Error(data.error);
+                } catch (e: any) {
+                  if (currentEvent === 'error') throw e;
                 }
-              } catch (e: any) {
-                if (currentEvent === 'error') throw e;
               }
             }
           }
+        } finally {
+          reader.releaseLock();
         }
       }
 
-      if (assistantResponse) {
+      // 2. Play speech and display assistant response only if generation is still active
+      if (generationIdRef.current === currentGenId && assistantResponse) {
         addMessage(assistantResponse, 'assistant');
-        speakText(assistantResponse);
+        speakText(assistantResponse, currentGenId);
       }
     } catch (err: any) {
-      addMessage(`Error: ${err.message || 'Failed to complete request.'}`, 'assistant');
+      if (err.name === 'AbortError' || controller.signal.aborted) {
+        // Silently return on user interruption
+        return;
+      }
+      if (generationIdRef.current === currentGenId) {
+        addMessage(`Error: ${err.message || 'Failed to complete request.'}`, 'assistant');
+      }
     } finally {
-      setIsLoading(false);
-      setActiveTool(null);
+      if (generationIdRef.current === currentGenId) {
+        setIsLoading(false);
+        setActiveTool(null);
+      }
     }
   };
 
@@ -229,6 +328,13 @@ const CommandConsole: React.FC = () => {
           <h3 className="text-cyan-200 font-semibold text-sm tracking-wide">Genius Local Command Console</h3>
         </div>
         <div className="flex items-center gap-2">
+          {isSpeaking && (
+            <div className="flex items-center gap-1.5 text-xs text-cyan-300 bg-cyan-950/70 px-2 py-0.5 rounded border border-cyan-800 animate-pulse">
+              <Volume2 size={13} className="text-cyan-400" />
+              <span>Speaking...</span>
+            </div>
+          )}
+
           {!isConnected ? (
             <div className="flex items-center gap-1.5 text-xs text-red-400 bg-red-950/50 px-2 py-0.5 rounded border border-red-800">
               <WifiOff size={13} />
@@ -299,6 +405,16 @@ const CommandConsole: React.FC = () => {
           {isListening ? <MicOff size={18} /> : <Mic size={18} />}
         </button>
 
+        {/* Language selector toggle */}
+        <button
+          type="button"
+          onClick={() => setSttLanguage((prev) => (prev === 'auto' ? 'en' : prev === 'en' ? 'hi' : 'auto'))}
+          className="px-2.5 py-1.5 text-xs font-mono font-semibold rounded border border-cyan-800/80 bg-cyan-950/50 text-cyan-300 hover:bg-cyan-900/60 transition-colors"
+          title={`Speech-to-Text Language: ${sttLanguage.toUpperCase()} (Click to toggle: AUTO -> EN -> HI)`}
+        >
+          {sttLanguage.toUpperCase()}
+        </button>
+
         <input
           type="text"
           value={inputText}
@@ -307,6 +423,19 @@ const CommandConsole: React.FC = () => {
           disabled={isLoading || isListening}
           className="flex-1 bg-black/50 border border-cyan-900/70 rounded-lg px-3.5 py-2 text-cyan-100 placeholder-cyan-700 text-sm focus:outline-none focus:border-cyan-500"
         />
+
+        {/* Immediate Stop Button when generating or speaking */}
+        {(isLoading || isSpeaking) && (
+          <button
+            type="button"
+            onClick={handleStop}
+            className="bg-red-600/90 hover:bg-red-500 text-white font-bold px-3 py-2.5 rounded-lg flex items-center gap-1.5 transition-all shadow-lg shadow-red-900/40 text-xs shrink-0"
+            title="Stop speech & generation (Esc)"
+          >
+            <Square size={14} className="fill-white" />
+            <span>Stop</span>
+          </button>
+        )}
 
         <button
           type="submit"
