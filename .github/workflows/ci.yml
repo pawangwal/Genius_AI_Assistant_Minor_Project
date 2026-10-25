@@ -36,9 +36,8 @@ jobs:
       POSTGRES_TEST_DB: genius_ai_test
       POSTGRES_HOST: localhost
       POSTGRES_PORT: "5433"
-      DATABASE_URL: "postgresql+asyncpg://genius:${{ secrets.CI_POSTGRES_PASSWORD }}@localhost:5433/genius_ai"
-      DATABASE_URL_TEST: "postgresql+asyncpg://genius_test:${{ secrets.CI_POSTGRES_TEST_PASSWORD }}@localhost:5433/genius_ai_test"
       OPENROUTER_MODEL: "nvidia/nemotron-3.5-lightning:free"
+
 
     steps:
       - uses: actions/checkout@v4

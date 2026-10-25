@@ -4,6 +4,32 @@ from pydantic import ValidationError
 from sqlalchemy import make_url
 from backend.app.core.config import Settings
 
+CONFIG_ENV_VARS = (
+    "DATABASE_URL",
+    "DATABASE_URL_TEST",
+    "POSTGRES_TEST_PASSWORD",
+    "POSTGRES_USER",
+    "POSTGRES_PASSWORD",
+    "POSTGRES_DB",
+    "POSTGRES_TEST_USER",
+    "POSTGRES_TEST_DB",
+    "POSTGRES_HOST",
+    "POSTGRES_PORT",
+    "SECRET_KEY",
+    "APP_ENV",
+    "AUTH_REQUIRED",
+    "OPENROUTER_API_KEY",
+    "OPENROUTER_MODEL",
+)
+
+
+@pytest.fixture(autouse=True)
+def isolate_config_environment(monkeypatch):
+    """Prevent CI and host environment variables from contaminating unit tests."""
+    for name in CONFIG_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+
+
 VALID_BASE_CONFIG = {
     "SECRET_KEY": "mock_secret_key_minimum_16_chars",
     "POSTGRES_USER": "mock_test_user",
@@ -15,6 +41,7 @@ VALID_BASE_CONFIG = {
     "POSTGRES_HOST": "localhost",
     "POSTGRES_PORT": 5433,
 }
+
 
 
 def test_missing_required_secret_key_fails_validation(monkeypatch):
