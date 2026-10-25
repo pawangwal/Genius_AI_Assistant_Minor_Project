@@ -7,6 +7,7 @@ import {
   MessageSquare,
   Terminal,
   Trophy,
+  Activity,
   Settings,
   ChevronLeft,
   ChevronRight
@@ -21,6 +22,7 @@ const NavigationSidebar: React.FC = () => {
   const navItems = [
     { id: 'home', icon: Home, label: 'Home' },
     { id: 'chat', icon: MessageSquare, label: 'Chat' },
+    { id: 'cricket', icon: Activity, label: 'Live Cricket' },
     { id: 'tasks', icon: ListChecks, label: 'Tasks' },
     { id: 'reminders', icon: Bell, label: 'Reminders' },
     { id: 'devices', icon: Lightbulb, label: 'Smart Devices' },

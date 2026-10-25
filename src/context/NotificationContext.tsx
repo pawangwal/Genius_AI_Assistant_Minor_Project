@@ -43,6 +43,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
   });
 
   const notifiedReminderIds = useRef<Set<string>>(new Set());
+  const isInitialScanRef = useRef<boolean>(true);
 
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -98,6 +99,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
       try {
         const reminders = await fetchReminders();
         const nowMs = Date.now();
+        const isFirstRun = isInitialScanRef.current;
 
         for (const rem of reminders) {
           if (rem.completed) continue;
@@ -106,6 +108,12 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
           // Parse due_time: could be ISO "2026-10-25T18:00" or similar
           const dueMs = Date.parse(rem.due_time);
           if (!isNaN(dueMs)) {
+            // Suppress initial spam for reminders overdue by more than 10 minutes
+            if (isFirstRun && dueMs < nowMs - 10 * 60 * 1000) {
+              notifiedReminderIds.current.add(rem.id);
+              continue;
+            }
+
             // If due_time is passed or due within 30 seconds
             if (dueMs <= nowMs + 30000) {
               notifiedReminderIds.current.add(rem.id);
@@ -117,6 +125,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
             }
           }
         }
+        isInitialScanRef.current = false;
       } catch {
         // Silently skip if database or backend is temporarily restarting
       }

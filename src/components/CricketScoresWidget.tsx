@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { RotateCw, ChevronLeft, ChevronRight, Activity } from 'lucide-react';
+import { RotateCw, ChevronLeft, ChevronRight, Activity, ExternalLink } from 'lucide-react';
 import { fetchCricketScores, CricketMatch } from '../services/api';
+import { useInterface } from '../context/InterfaceContext';
 
 interface CricketScoresWidgetProps {
   expanded: boolean;
 }
 
 const CricketScoresWidget: React.FC<CricketScoresWidgetProps> = ({ expanded }) => {
+  const { setActivePanel } = useInterface();
   const [matches, setMatches] = useState<CricketMatch[]>([]);
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'empty' | 'error'>('loading');
   const [errorMessage, setErrorMessage] = useState<string>('');
@@ -67,8 +69,8 @@ const CricketScoresWidget: React.FC<CricketScoresWidgetProps> = ({ expanded }) =
     return (
       <div 
         className="my-2 mx-2 p-2 rounded-lg bg-cyan-950/40 border border-cyan-800/40 flex flex-col items-center justify-center cursor-pointer group hover:border-cyan-500/50 transition-all"
-        title="Live Cricket Scores"
-        onClick={handleRefresh}
+        title="Open Live Cricket Page"
+        onClick={() => setActivePanel('cricket')}
       >
         <div className="relative">
           <Activity size={18} className="text-cyan-400 group-hover:text-cyan-300" />
@@ -85,13 +87,20 @@ const CricketScoresWidget: React.FC<CricketScoresWidgetProps> = ({ expanded }) =
     <div className="my-2 mx-2 p-2.5 rounded-lg bg-gray-900/80 border border-cyan-900/50 backdrop-blur-sm shadow-md transition-all hover:border-cyan-700/60">
       {/* Header bar */}
       <div className="flex items-center justify-between pb-1.5 border-b border-cyan-900/40 text-[11px]">
-        <div className="flex items-center space-x-1.5">
+        <button 
+          onClick={() => setActivePanel('cricket')}
+          className="flex items-center space-x-1.5 hover:opacity-80 transition-opacity text-left"
+          title="Open dedicated cricket page"
+        >
           <span className="relative flex h-2 w-2">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
             <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
           </span>
-          <span className="font-semibold text-cyan-400 tracking-wide">LIVE SCORES</span>
-        </div>
+          <span className="font-semibold text-cyan-400 tracking-wide hover:underline flex items-center">
+            LIVE SCORES
+            <ExternalLink size={10} className="ml-1 text-cyan-500" />
+          </span>
+        </button>
 
         <div className="flex items-center space-x-1">
           {matches.length > 1 && (

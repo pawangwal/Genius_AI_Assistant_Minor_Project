@@ -99,6 +99,11 @@ async def get_cricket_scores_alias() -> CricketScoresResponse:
     """Direct alias endpoint for /api/cricket/scores."""
     return await fetch_cricapi_scores()
 
+@app.get("/api/cricket/all", response_model=CricketScoresResponse, tags=["Cricket"])
+async def get_all_cricket_scores_alias() -> CricketScoresResponse:
+    """Direct alias endpoint for /api/cricket/all."""
+    return await fetch_cricapi_scores()
+
 @app.get("/", tags=["Root"])
 async def root():
     return {

@@ -39,9 +39,25 @@ async def extract_text_from_upload(upload_file: UploadFile) -> ExtractedFileResu
             detail=f"Unsupported file type '{ext}'. Supported formats: {', '.join(sorted(SUPPORTED_EXTENSIONS))}."
         )
 
-    # Read binary content
+    # Read binary content in bounded chunks to prevent memory exhaustion
+    CHUNK_SIZE = 64 * 1024  # 64 KB
+    chunks = []
+    size = 0
     try:
-        content_bytes = await upload_file.read()
+        while True:
+            chunk = await upload_file.read(CHUNK_SIZE)
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > MAX_FILE_SIZE_BYTES:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="File exceeds maximum allowed size of 5 MB."
+                )
+            chunks.append(chunk)
+        content_bytes = b"".join(chunks)
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error(f"Failed to read uploaded file '{raw_filename}': {exc}")
         raise HTTPException(
@@ -49,17 +65,10 @@ async def extract_text_from_upload(upload_file: UploadFile) -> ExtractedFileResu
             detail="Failed to read uploaded file data."
         )
 
-    size = len(content_bytes)
     if size == 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Uploaded file '{raw_filename}' is empty."
-        )
-
-    if size > MAX_FILE_SIZE_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"File exceeds maximum allowed size of 5 MB (received {size / (1024 * 1024):.2f} MB)."
         )
 
     extracted_text = ""

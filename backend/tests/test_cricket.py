@@ -140,3 +140,32 @@ async def test_cricket_scores_upstream_failure_response():
                 data = res.json()
                 assert data["status"] == "error"
                 assert "secret-key-12345" not in res.text
+
+@pytest.mark.asyncio
+async def test_cricket_all_and_matches_endpoints():
+    """Both /api/v1/cricket/all and /api/v1/cricket/matches return full match list."""
+    with patch.object(settings, "CRICAPI_KEY", "mock-valid-key"):
+        with patch("backend.app.api.v1.cricket.query_cricapi_raw", new_callable=AsyncMock) as mock_query:
+            mock_query.return_value = MOCK_CRICAPI_SUCCESS
+
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as ac:
+                # Test /api/v1/cricket/all
+                res_all = await ac.get("/api/v1/cricket/all")
+                assert res_all.status_code == 200
+                data_all = res_all.json()
+                assert data_all["status"] == "success"
+                assert len(data_all["matches"]) == 1
+
+                # Test /api/v1/cricket/matches
+                res_matches = await ac.get("/api/v1/cricket/matches")
+                assert res_matches.status_code == 200
+                data_matches = res_matches.json()
+                assert data_matches["status"] == "success"
+                assert len(data_matches["matches"]) == 1
+
+                # Test root alias /api/cricket/all
+                res_alias = await ac.get("/api/cricket/all")
+                assert res_alias.status_code == 200
+                assert res_alias.json()["status"] == "success"
+

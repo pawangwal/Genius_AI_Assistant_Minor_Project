@@ -142,6 +142,19 @@ export async function deleteReminder(id: string): Promise<void> {
   if (!resp.ok) throw new Error('Failed to delete reminder');
 }
 
+export async function updateReminder(
+  id: string,
+  updates: Partial<{ title: string; due_time: string; completed: boolean }>
+): Promise<ReminderItem> {
+  const resp = await fetch(`${API_BASE_URL}/api/v1/reminders/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  });
+  if (!resp.ok) throw new Error('Failed to update reminder');
+  return await resp.json();
+}
+
 export interface NetworkStatusResponse {
   fastapi: string;
   provider: string;
@@ -187,6 +200,14 @@ export async function fetchCricketScores(): Promise<CricketScoresResponse> {
   const resp = await fetch(`${API_BASE_URL}/api/v1/cricket/scores`);
   if (!resp.ok) {
     throw new Error(`Cricket score request failed with HTTP ${resp.status}`);
+  }
+  return await resp.json();
+}
+
+export async function fetchAllCricketScores(): Promise<CricketScoresResponse> {
+  const resp = await fetch(`${API_BASE_URL}/api/v1/cricket/all`);
+  if (!resp.ok) {
+    throw new Error(`Cricket all matches request failed with HTTP ${resp.status}`);
   }
   return await resp.json();
 }

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Bell, Plus, Trash2, CheckCircle, Circle, Loader2, AlertCircle } from 'lucide-react';
-import { fetchReminders, createReminder, deleteReminder, ReminderItem } from '../../services/api';
+import { Bell, Plus, Trash2, Loader2, AlertCircle, Pencil, Check, X } from 'lucide-react';
+import { fetchReminders, createReminder, updateReminder, deleteReminder, ReminderItem } from '../../services/api';
 import { useNotifications } from '../../context/NotificationContext';
 
 const RemindersPanel: React.FC = () => {
@@ -9,6 +9,10 @@ const RemindersPanel: React.FC = () => {
   const [newDateTime, setNewDateTime] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [editingReminderId, setEditingReminderId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState('');
+  const [editingDueTime, setEditingDueTime] = useState('');
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
   const { showToast, browserPermission, requestBrowserPermission } = useNotifications();
 
   const loadReminders = async () => {
@@ -42,6 +46,51 @@ const RemindersPanel: React.FC = () => {
     }
   };
 
+  const toInputDateTime = (dtStr: string): string => {
+    try {
+      const parsed = new Date(dtStr);
+      if (isNaN(parsed.getTime())) {
+        return dtStr.slice(0, 16);
+      }
+      const pad = (n: number) => String(n).padStart(2, '0');
+      return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}T${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`;
+    } catch {
+      return dtStr.slice(0, 16);
+    }
+  };
+
+  const handleStartEdit = (reminder: ReminderItem) => {
+    setEditingReminderId(reminder.id);
+    setEditingTitle(reminder.title);
+    setEditingDueTime(toInputDateTime(reminder.due_time));
+  };
+
+  const handleCancelEdit = () => {
+    setEditingReminderId(null);
+    setEditingTitle('');
+    setEditingDueTime('');
+  };
+
+  const handleSaveEdit = async (id: string) => {
+    if (!editingTitle.trim()) return;
+    setIsSavingEdit(true);
+    try {
+      const updated = await updateReminder(id, {
+        title: editingTitle.trim(),
+        due_time: editingDueTime ? new Date(editingDueTime).toISOString() : undefined,
+      });
+      setReminders((prev) => prev.map((r) => (r.id === id ? updated : r)));
+      setEditingReminderId(null);
+      setEditingTitle('');
+      setEditingDueTime('');
+      showToast('Reminder Updated', `"${updated.title}" updated for ${updated.due_time}.`, 'reminder');
+    } catch (err: any) {
+      setError(err.message || 'Failed to update reminder');
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
   const handleRemove = async (id: string) => {
     try {
       const target = reminders.find((r) => r.id === id);
@@ -54,7 +103,7 @@ const RemindersPanel: React.FC = () => {
   };
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col min-h-0">
       <div className="flex items-center justify-between mb-6 border-b border-purple-900/40 pb-3">
         <div className="flex items-center">
           <Bell className="text-purple-400 mr-2" size={24} />
@@ -107,7 +156,7 @@ const RemindersPanel: React.FC = () => {
         </div>
       </form>
 
-      <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+      <div className="flex-1 overflow-y-auto space-y-2 pr-1 min-h-0">
         {reminders.length === 0 && !loading && (
           <div className="text-center py-10 text-purple-700 text-sm">
             No active reminders scheduled.
@@ -118,21 +167,69 @@ const RemindersPanel: React.FC = () => {
             key={reminder.id}
             className="flex items-center gap-3 p-3 bg-black/30 border border-purple-900/40 rounded-lg group hover:border-purple-700/50 transition-all"
           >
-            <div className="flex-1">
-              <div className="text-purple-200 text-sm font-medium">
-                {reminder.title}
+            {editingReminderId === reminder.id ? (
+              <div className="flex-1 flex flex-col gap-2">
+                <input
+                  type="text"
+                  value={editingTitle}
+                  onChange={(e) => setEditingTitle(e.target.value)}
+                  autoFocus
+                  placeholder="Reminder title..."
+                  className="w-full bg-gray-950 border border-purple-500 rounded px-2.5 py-1 text-sm text-purple-100 focus:outline-none"
+                />
+                <div className="flex items-center gap-2">
+                  <input
+                    type="datetime-local"
+                    value={editingDueTime}
+                    onChange={(e) => setEditingDueTime(e.target.value)}
+                    className="flex-1 bg-gray-950 border border-purple-500/70 rounded px-2.5 py-1 text-xs text-purple-200 focus:outline-none"
+                  />
+                  <button
+                    onClick={() => handleSaveEdit(reminder.id)}
+                    disabled={isSavingEdit || !editingTitle.trim()}
+                    className="p-1.5 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/40 rounded transition-colors"
+                    title="Save reminder"
+                  >
+                    <Check size={16} />
+                  </button>
+                  <button
+                    onClick={handleCancelEdit}
+                    className="p-1.5 text-gray-400 hover:text-gray-200 hover:bg-gray-800 rounded transition-colors"
+                    title="Cancel edit"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
               </div>
-              <div className="text-xs text-purple-400 font-mono mt-0.5">
-                Due: {reminder.due_time}
-              </div>
-            </div>
+            ) : (
+              <>
+                <div className="flex-1">
+                  <div className="text-purple-200 text-sm font-medium">
+                    {reminder.title}
+                  </div>
+                  <div className="text-xs text-purple-400 font-mono mt-0.5">
+                    Due: {reminder.due_time}
+                  </div>
+                </div>
 
-            <button
-              onClick={() => handleRemove(reminder.id)}
-              className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-300 transition-opacity"
-            >
-              <Trash2 size={16} />
-            </button>
+                <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={() => handleStartEdit(reminder)}
+                    className="p-1 text-purple-400 hover:text-purple-200 hover:bg-purple-950/40 rounded transition-colors"
+                    title="Edit reminder"
+                  >
+                    <Pencil size={15} />
+                  </button>
+                  <button
+                    onClick={() => handleRemove(reminder.id)}
+                    className="p-1 text-red-400 hover:text-red-300 hover:bg-red-950/40 rounded transition-colors"
+                    title="Dismiss reminder"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         ))}
       </div>

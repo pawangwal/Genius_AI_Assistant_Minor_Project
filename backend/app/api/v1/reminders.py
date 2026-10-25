@@ -20,6 +20,11 @@ class ReminderCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
     due_time: str = Field(..., min_length=1, max_length=100)
 
+class ReminderUpdate(BaseModel):
+    title: Optional[str] = Field(None, min_length=1, max_length=255)
+    due_time: Optional[str] = Field(None, min_length=1, max_length=100)
+    completed: Optional[bool] = None
+
 class ReminderResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -89,6 +94,49 @@ async def create_reminder(
     except SQLAlchemyError as e:
         await db.rollback()
         logger.error(f"Failed to create reminder for user '{user_id}': {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=DATABASE_ERROR_MESSAGE
+        )
+
+@router.patch("/{reminder_id}", response_model=ReminderResponse)
+async def update_reminder(
+    reminder_id: str,
+    payload: ReminderUpdate,
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_current_user_id)
+):
+    try:
+        stmt = select(ReminderEntity).where(ReminderEntity.id == reminder_id)
+        result = await db.execute(stmt)
+        reminder = result.scalar_one_or_none()
+        if not reminder:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reminder not found")
+        if reminder.user_id != user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Unauthorized to modify this reminder")
+
+        if payload.title is not None:
+            reminder.title = payload.title
+        if payload.due_time is not None:
+            reminder.due_time = payload.due_time
+        if payload.completed is not None:
+            reminder.completed = payload.completed
+
+        await db.commit()
+        await db.refresh(reminder)
+        return ReminderResponse(
+            id=reminder.id,
+            title=reminder.title,
+            due_time=reminder.due_time,
+            completed=reminder.completed,
+            user_id=reminder.user_id,
+            created_at=reminder.created_at.isoformat() if reminder.created_at else ""
+        )
+    except HTTPException:
+        raise
+    except SQLAlchemyError as e:
+        await db.rollback()
+        logger.error(f"Failed to update reminder '{reminder_id}' for user '{user_id}': {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=DATABASE_ERROR_MESSAGE

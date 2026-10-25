@@ -171,6 +171,15 @@ async def test_reminder_lifecycle_crud(client_with_db):
     assert list_resp.status_code == 200
     assert len(list_resp.json()) == 1
 
+    # Update reminder
+    patch_resp = await client_with_db.patch(f"/api/v1/reminders/{reminder_id}", json={
+        "title": "Evening IPL match starts (Rescheduled)",
+        "due_time": "20:00"
+    })
+    assert patch_resp.status_code == 200
+    assert patch_resp.json()["title"] == "Evening IPL match starts (Rescheduled)"
+    assert patch_resp.json()["due_time"] == "20:00"
+
     del_resp = await client_with_db.delete(f"/api/v1/reminders/{reminder_id}")
     assert del_resp.status_code == 204
 

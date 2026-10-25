@@ -152,3 +152,13 @@ async def fetch_cricapi_scores() -> CricketScoresResponse:
 async def get_cricket_scores() -> CricketScoresResponse:
     """Fetch live and current cricket scores from CricAPI."""
     return await fetch_cricapi_scores()
+
+@router.get("/all", response_model=CricketScoresResponse)
+async def get_all_cricket_scores() -> CricketScoresResponse:
+    """Fetch all current and live cricket matches with full scorecards."""
+    return await fetch_cricapi_scores()
+
+@router.get("/matches", response_model=CricketScoresResponse)
+async def get_cricket_matches() -> CricketScoresResponse:
+    """Matches listing endpoint for dedicated cricket scores dashboard."""
+    return await fetch_cricapi_scores()

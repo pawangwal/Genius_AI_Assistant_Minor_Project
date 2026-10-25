@@ -35,9 +35,9 @@ DEMO_TASKS = [
 ]
 
 def get_demo_reminders():
-    now = datetime.now(timezone.utc)
-    # Reminder 1: Due in 1 hour
-    due_1 = (now + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M")
+    now = datetime.now()
+    # Reminder 1: Due in 2 hours
+    due_1 = (now + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M")
     # Reminder 2: Due tomorrow at 10 AM
     due_2 = (now + timedelta(days=1)).replace(hour=10, minute=0, second=0).strftime("%Y-%m-%dT%H:%M")
 
