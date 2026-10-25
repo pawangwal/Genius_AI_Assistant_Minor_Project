@@ -46,6 +46,29 @@ class Settings(BaseSettings):
 
     # CricAPI Live Cricket Scores Configuration
     CRICAPI_KEY: Optional[str] = Field(default=None, description="CricAPI access key for live cricket scores")
+    CRICAPI_KEY1: Optional[str] = Field(default=None, description="Primary CricAPI access key")
+    CRICAPI_KEY2: Optional[str] = Field(default=None, description="Secondary CricAPI access key for rotation")
+    CRICAPI_KEY3: Optional[str] = Field(default=None, description="Tertiary CricAPI access key for rotation")
+    CRICAPI_KEYS: Optional[str] = Field(default=None, description="Comma-separated list of CricAPI access keys")
+
+    def get_cricapi_keys(self) -> List[str]:
+        """Returns all configured CricAPI keys in priority order without duplicates."""
+        candidates = [
+            self.CRICAPI_KEY1,
+            self.CRICAPI_KEY2,
+            self.CRICAPI_KEY3,
+            self.CRICAPI_KEY,
+            self.CRICAPI_KEYS,
+        ]
+        keys: List[str] = []
+        for cand in candidates:
+            if not cand or not isinstance(cand, str):
+                continue
+            for item in cand.split(","):
+                k = item.strip()
+                if k and k not in keys:
+                    keys.append(k)
+        return keys
 
     # Local Ollama AI Settings (Alternative local provider)
     OLLAMA_BASE_URL: str = Field(default="http://127.0.0.1:11434")
@@ -258,7 +281,7 @@ class Settings(BaseSettings):
         for k, v in self.__dict__.items():
             if k.startswith("_"):
                 continue
-            if k in ("SECRET_KEY", "POSTGRES_PASSWORD", "POSTGRES_TEST_PASSWORD", "OPENROUTER_API_KEY", "CRICAPI_KEY"):
+            if k in ("SECRET_KEY", "POSTGRES_PASSWORD", "POSTGRES_TEST_PASSWORD", "OPENROUTER_API_KEY", "CRICAPI_KEY", "CRICAPI_KEY1", "CRICAPI_KEY2", "CRICAPI_KEY3", "CRICAPI_KEYS"):
                 fields.append(f"{k}='**********'")
             elif k == "DATABASE_URL":
                 fields.append(f"{k}='{self.masked_database_url}'")

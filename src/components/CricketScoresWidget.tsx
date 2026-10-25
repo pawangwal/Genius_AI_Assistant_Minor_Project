@@ -15,17 +15,17 @@ const CricketScoresWidget: React.FC<CricketScoresWidgetProps> = ({ expanded }) =
   const [currentIndex, setCurrentIndex] = useState(0);
   const isFetchingRef = useRef(false);
 
-  const loadScores = useCallback(async () => {
+  const loadScores = useCallback(async (force: boolean = false) => {
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
     setStatus((prev) => (prev === 'idle' ? 'loading' : prev));
 
     try {
-      const resp = await fetchCricketScores();
-      if (resp.status === 'success' && resp.matches.length > 0) {
+      const resp = await fetchCricketScores(force);
+      if ((resp.status === 'success' || resp.status === 'cached') && resp.matches.length > 0) {
         setMatches(resp.matches);
         setStatus('success');
-        setErrorMessage('');
+        setErrorMessage(resp.message || '');
       } else if (resp.status === 'empty' || resp.matches.length === 0) {
         setMatches([]);
         setStatus('empty');
@@ -45,8 +45,8 @@ const CricketScoresWidget: React.FC<CricketScoresWidgetProps> = ({ expanded }) =
   }, []);
 
   useEffect(() => {
-    loadScores();
-    const interval = setInterval(loadScores, 60000); // 60s poll
+    loadScores(false);
+    const interval = setInterval(() => loadScores(false), 60000); // 60s passive poll (uses 30s cache)
     return () => clearInterval(interval);
   }, [loadScores]);
 
@@ -62,8 +62,9 @@ const CricketScoresWidget: React.FC<CricketScoresWidgetProps> = ({ expanded }) =
 
   const handleRefresh = (e: React.MouseEvent) => {
     e.stopPropagation();
-    loadScores();
+    loadScores(true); // Force fresh request on manual click
   };
+
 
   if (!expanded) {
     return (

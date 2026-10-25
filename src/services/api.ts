@@ -191,26 +191,78 @@ export interface CricketMatch {
 }
 
 export interface CricketScoresResponse {
-  status: 'success' | 'empty' | 'error';
+  status: 'success' | 'empty' | 'error' | 'cached';
   message?: string;
   matches: CricketMatch[];
 }
 
-export async function fetchCricketScores(): Promise<CricketScoresResponse> {
-  const resp = await fetch(`${API_BASE_URL}/api/v1/cricket/scores`);
+export interface BatsmanScore {
+  name: string;
+  runs: number;
+  balls: number;
+  fours: number;
+  sixes: number;
+  strike_rate: number;
+  dismissal: string;
+}
+
+export interface BowlerScore {
+  name: string;
+  overs: number;
+  maidens: number;
+  runs: number;
+  wickets: number;
+  economy: number;
+}
+
+export interface InningScorecard {
+  inning: string;
+  runs: number;
+  wickets: number;
+  overs: number;
+  batsmen: BatsmanScore[];
+  bowlers: BowlerScore[];
+}
+
+export interface MatchScorecardResponse {
+  status: 'success' | 'error' | 'cached';
+  match_id: string;
+  name: string;
+  status_text?: string;
+  venue?: string;
+  date?: string;
+  teams?: string[];
+  innings: InningScorecard[];
+  message?: string;
+}
+
+export async function fetchCricketScores(force: boolean = false): Promise<CricketScoresResponse> {
+  const url = `${API_BASE_URL}/api/v1/cricket/scores${force ? '?force=true' : ''}`;
+  const resp = await fetch(url);
   if (!resp.ok) {
     throw new Error(`Cricket score request failed with HTTP ${resp.status}`);
   }
   return await resp.json();
 }
 
-export async function fetchAllCricketScores(): Promise<CricketScoresResponse> {
-  const resp = await fetch(`${API_BASE_URL}/api/v1/cricket/all`);
+export async function fetchAllCricketScores(force: boolean = false): Promise<CricketScoresResponse> {
+  const url = `${API_BASE_URL}/api/v1/cricket/all${force ? '?force=true' : ''}`;
+  const resp = await fetch(url);
   if (!resp.ok) {
     throw new Error(`Cricket all matches request failed with HTTP ${resp.status}`);
   }
   return await resp.json();
 }
+
+export async function fetchMatchScorecard(matchId: string, force: boolean = false): Promise<MatchScorecardResponse> {
+  const url = `${API_BASE_URL}/api/v1/cricket/scorecard/${matchId}${force ? '?force=true' : ''}`;
+  const resp = await fetch(url);
+  if (!resp.ok) {
+    throw new Error(`Match scorecard request failed with HTTP ${resp.status}`);
+  }
+  return await resp.json();
+}
+
 
 export interface ExtractedFileResult {
   filename: string;

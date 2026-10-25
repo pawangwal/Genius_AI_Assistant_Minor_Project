@@ -174,14 +174,40 @@ async def test_reminder_lifecycle_crud(client_with_db):
     # Update reminder
     patch_resp = await client_with_db.patch(f"/api/v1/reminders/{reminder_id}", json={
         "title": "Evening IPL match starts (Rescheduled)",
-        "due_time": "20:00"
+        "due_time": "2026-10-25T20:00:00Z"
     })
     assert patch_resp.status_code == 200
     assert patch_resp.json()["title"] == "Evening IPL match starts (Rescheduled)"
-    assert patch_resp.json()["due_time"] == "20:00"
+    assert "20:00:00" in patch_resp.json()["due_time"]
 
     del_resp = await client_with_db.delete(f"/api/v1/reminders/{reminder_id}")
     assert del_resp.status_code == 204
+
+@pytest.mark.asyncio
+async def test_reminder_timestamp_validation_and_rejection(client_with_db):
+    """Malformed or invalid timestamps must be rejected with HTTP 422 at the API boundary."""
+    # 1. Malformed string rejected
+    bad_resp = await client_with_db.post("/api/v1/reminders", json={
+        "title": "Invalid reminder",
+        "due_time": "not-a-date-or-time"
+    })
+    assert bad_resp.status_code == 422
+
+    # 2. Empty string rejected
+    empty_resp = await client_with_db.post("/api/v1/reminders", json={
+        "title": "Empty time reminder",
+        "due_time": "   "
+    })
+    assert empty_resp.status_code == 422
+
+    # 3. Valid timezone-aware ISO 8601 accepted
+    good_resp = await client_with_db.post("/api/v1/reminders", json={
+        "title": "Valid timezone reminder",
+        "due_time": "2026-10-25T14:30:00+05:30"
+    })
+    assert good_resp.status_code == 201
+    assert "+05:30" in good_resp.json()["due_time"]
+
 
 @pytest.mark.asyncio
 async def test_cross_user_task_isolation(client_with_db):

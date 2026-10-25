@@ -1,7 +1,8 @@
 """Reminders persistence API endpoints with sanitized error boundaries."""
 import logging
 from typing import List, Optional
-from pydantic import BaseModel, Field, ConfigDict
+from datetime import datetime, date
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -16,14 +17,65 @@ router = APIRouter(prefix="/reminders", tags=["Reminders"])
 
 DATABASE_ERROR_MESSAGE = "Database service unavailable. Downstream storage is degraded."
 
+def normalize_due_time(v: Optional[str]) -> Optional[str]:
+    """Validates and normalizes reminder timestamps into ISO 8601 format."""
+    if v is None:
+        return None
+    val = v.strip()
+    if not val:
+        raise ValueError("due_time cannot be empty")
+
+    # 1. Try ISO 8601 parsing (supports timezone offsets and trailing Z)
+    try:
+        clean_iso = val.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(clean_iso)
+        return dt.isoformat()
+    except Exception:
+        pass
+
+    # 2. Try standard date-time representations
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y/%m/%d %H:%M:%S", "%Y/%m/%d %H:%M"):
+        try:
+            dt = datetime.strptime(val, fmt)
+            return dt.isoformat()
+        except ValueError:
+            pass
+
+    # 3. Try time-only format (combines with today's date for local convenience)
+    for fmt in ("%H:%M:%S", "%H:%M"):
+        try:
+            t = datetime.strptime(val, fmt).time()
+            dt = datetime.combine(date.today(), t)
+            return dt.isoformat()
+        except ValueError:
+            pass
+
+    raise ValueError(
+        f"Invalid datetime format '{val}'. due_time must be a valid ISO 8601 timestamp (e.g. '2026-10-25T19:30:00Z', '2026-10-25T19:30:00') or 'HH:MM'."
+    )
+
 class ReminderCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
     due_time: str = Field(..., min_length=1, max_length=100)
+
+    @field_validator("due_time")
+    @classmethod
+    def validate_due_time(cls, v: str) -> str:
+        res = normalize_due_time(v)
+        if not res:
+            raise ValueError("due_time is required")
+        return res
 
 class ReminderUpdate(BaseModel):
     title: Optional[str] = Field(None, min_length=1, max_length=255)
     due_time: Optional[str] = Field(None, min_length=1, max_length=100)
     completed: Optional[bool] = None
+
+    @field_validator("due_time")
+    @classmethod
+    def validate_due_time(cls, v: Optional[str]) -> Optional[str]:
+        return normalize_due_time(v)
+
 
 class ReminderResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)

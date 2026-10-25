@@ -8,6 +8,18 @@ from backend.app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Compatibility shim: PyAV >= 14 removed metadata_errors keyword argument which faster-whisper still passes
+try:
+    import av
+    if hasattr(av, "open"):
+        _orig_av_open = av.open
+        def _compat_av_open(*args, **kwargs):
+            kwargs.pop("metadata_errors", None)
+            return _orig_av_open(*args, **kwargs)
+        av.open = _compat_av_open
+except ImportError:
+    pass
+
 def probe_audio_duration(file_path: str) -> Optional[float]:
     """Probes media duration before running expensive ML inference using PyAV, Mutagen, and wave."""
     # 1. Primary: PyAV (FFmpeg C-bindings, handles all audio containers including WebM, Opus, MP3, WAV, FLAC, OGG)
@@ -17,8 +29,39 @@ def probe_audio_duration(file_path: str) -> Optional[float]:
             if container.duration is not None and container.duration > 0:
                 return float(container.duration) / 1_000_000.0
             for stream in container.streams.audio:
-                if stream.duration is not None and stream.time_base is not None:
+                if stream.duration is not None and stream.time_base is not None and stream.duration > 0:
                     return float(stream.duration * stream.time_base)
+
+            # Streaming containers (e.g. browser MediaRecorder WebM) lack duration in headers.
+            # Demux audio packets to determine stream end timestamp.
+            if container.streams.audio:
+                audio_stream = container.streams.audio[0]
+                tb = audio_stream.time_base
+                max_pts = 0
+                has_packet_pts = False
+                for packet in container.demux(audio_stream):
+                    if packet.pts is not None:
+                        has_packet_pts = True
+                        pts_end = packet.pts + (packet.duration or 0)
+                        if pts_end > max_pts:
+                            max_pts = pts_end
+                if has_packet_pts and tb is not None and max_pts > 0:
+                    return float(max_pts * tb)
+
+                # Fallback: decode frames if packet PTS was absent
+                container.seek(0)
+                total_samples = 0
+                rate = audio_stream.rate or 16000
+                max_samples = int(settings.STT_MAX_DURATION_SECONDS * rate)
+                for frame in container.decode(audio_stream):
+                    total_samples += frame.samples
+                    if frame.rate:
+                        rate = frame.rate
+                        max_samples = int(settings.STT_MAX_DURATION_SECONDS * rate)
+                    if total_samples > max_samples:
+                        return float(total_samples) / float(rate)
+                if rate > 0 and total_samples > 0:
+                    return float(total_samples) / float(rate)
     except Exception as e:
         logger.debug(f"PyAV duration probe failed for {file_path}: {e}")
 
